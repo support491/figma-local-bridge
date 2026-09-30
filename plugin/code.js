@@ -1860,7 +1860,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-8";
+const DS_VERSION = "ds-9";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2588,7 +2588,25 @@ async function dsRecolorGlyphs(input) {
   return { changed };
 }
 
+async function dsDeleteStyles(input) {
+  const removed = [];
+  const text = await dsTextStyleMap();
+  for (const name of input.text || []) {
+    const style = text.get(name);
+    if (style && style.name === name) { style.remove(); removed.push(name); }
+  }
+  const effects = await dsEffectStyleMap();
+  for (const name of input.effect || []) {
+    const style = effects.get(name);
+    if (style && style.name === name) { style.remove(); removed.push(name); }
+  }
+  dsState.textStyles = null;
+  dsState.effectStyles = null;
+  return { removed };
+}
+
 async function executeDesignSystem(name, input) {
+  if (name === "dsDeleteStyles") return dsDeleteStyles(input);
   if (name === "dsReadGlyphs") return dsReadGlyphs(input);
   if (name === "dsRecolorGlyphs") return dsRecolorGlyphs(input);
   if (name === "dsColorVars") return dsColorVars(input);
