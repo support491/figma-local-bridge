@@ -1860,7 +1860,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-9";
+const DS_VERSION = "ds-13";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -1882,7 +1882,9 @@ async function dsVars() {
 }
 
 async function dsVar(ref) {
-  const variable = (await dsVars()).get(ref);
+  let variable = (await dsVars()).get(ref);
+  // createColorTokens or the Variables panel can add variables after the cache was built.
+  if (!variable) { dsState.vars = null; variable = (await dsVars()).get(ref); }
   if (!variable) throw new Error(`Unknown variable "${ref}".`);
   return variable;
 }
@@ -1923,9 +1925,11 @@ async function dsPaint(spec) {
   const source = typeof spec === "string" ? (spec.startsWith("#") ? { hex: spec } : { var: spec }) : spec;
   const opacity = source.opacity === undefined ? 1 : source.opacity;
   if (source.var) {
+    // A bound colour variable supplies its own alpha and Figma ignores the paint's opacity,
+    // so a translucent token must be an alpha variable rather than {var, opacity}.
+    if (opacity !== 1) throw new Error(`Paint opacity can't be combined with variable "${source.var}". Bind a variable whose value has the alpha you need.`);
     const variable = await dsVar(source.var);
-    const bound = figma.variables.setBoundVariableForPaint({ type: "SOLID", color: { r: 0, g: 0, b: 0 }, opacity }, "color", variable);
-    return Object.assign({}, bound, { opacity });
+    return figma.variables.setBoundVariableForPaint({ type: "SOLID", color: { r: 0, g: 0, b: 0 }, opacity: 1 }, "color", variable);
   }
   if (!/^#[0-9a-fA-F]{6}$/.test(source.hex || "")) throw new Error(`Invalid colour ${JSON.stringify(spec)}.`);
   return { type: "SOLID", color: hexToColor(source.hex), opacity };
@@ -2097,6 +2101,13 @@ function dsRecord(node, spec, ctx) {
   if (spec.key) ctx.keys[spec.key] = node.id;
 }
 
+// Figma adds new nodes to the current page immediately, before we parent them, so every
+// created node is tracked from birth; dsRender removes them all if the render fails.
+function dsTrack(node, ctx) {
+  ctx.created.push(node);
+  return node;
+}
+
 async function dsResolveComponent(ref, variant) {
   let node = null;
   if (typeof ref === "string" && /^\d+:\d+$/.test(ref)) node = await figma.getNodeByIdAsync(ref);
@@ -2104,7 +2115,10 @@ async function dsResolveComponent(ref, variant) {
     const id = dsState.components.get(ref);
     if (id) node = await figma.getNodeByIdAsync(id);
   }
-  if (!node) throw new Error(`Component "${ref}" is not indexed. Run dsIndex or create it first.`);
+  if (!node) {
+    if (dsState.components.get(ref)) dsState.components.delete(ref);
+    throw new Error(`Component "${ref}" was not found. It may have been deleted; run dsIndex or create it first.`);
+  }
   if (node.type === "COMPONENT_SET") {
     if (!variant) return node.defaultVariant;
     const match = node.children.find((child) => Object.entries(variant).every(([key, value]) => child.variantProperties && child.variantProperties[key] === value));
@@ -2177,7 +2191,7 @@ async function dsSetInstanceProperties(instance, props, label) {
 }
 
 async function dsBuildText(spec, parent, ctx) {
-  const text = figma.createText();
+  const text = dsTrack(figma.createText(), ctx);
   parent.appendChild(text);
   dsRecord(text, spec, ctx);
   let style = null;
@@ -2228,7 +2242,7 @@ async function dsBuildText(spec, parent, ctx) {
 
 async function dsBuildInstance(spec, parent, ctx) {
   const component = await dsResolveComponent(spec.of, spec.variant);
-  const instance = component.createInstance();
+  const instance = dsTrack(component.createInstance(), ctx);
   parent.appendChild(instance);
   dsRecord(instance, spec, ctx);
   if (spec.name) instance.name = spec.name;
@@ -2252,6 +2266,13 @@ async function dsBuildInstance(spec, parent, ctx) {
     for (const glyph of instance.findAll((node) => node.name === "Glyph")) glyph.strokes = paints;
   }
   if (spec.scale && spec.scale !== 1) instance.rescale(spec.scale);
+  if (spec.pad !== undefined && dsIsAutoLayout(instance)) {
+    const [top, right, bottom, left] = dsPad(spec.pad);
+    await dsNumber(instance, "paddingTop", top);
+    await dsNumber(instance, "paddingRight", right);
+    await dsNumber(instance, "paddingBottom", bottom);
+    await dsNumber(instance, "paddingLeft", left);
+  }
   if (spec.exposed) instance.isExposedInstance = true;
   if (spec.effect || spec.effects) await dsApplyEffects(instance, spec);
   if (spec.opacity !== undefined) instance.opacity = spec.opacity;
@@ -2260,14 +2281,14 @@ async function dsBuildInstance(spec, parent, ctx) {
 }
 
 async function dsBuildIcon(spec, parent, ctx) {
-  const component = figma.createComponent();
+  const component = dsTrack(figma.createComponent(), ctx);
   component.name = spec.name;
   component.resize(24, 24);
   component.fills = [];
   component.clipsContent = false;
   parent.appendChild(component);
   dsRecord(component, spec, ctx);
-  const source = figma.createNodeFromSvg(spec.svg);
+  const source = dsTrack(figma.createNodeFromSvg(spec.svg), ctx);
   component.appendChild(source);
   source.x = 0;
   source.y = 0;
@@ -2296,7 +2317,7 @@ async function dsBuildIcon(spec, parent, ctx) {
 async function dsBuildComponentSet(spec, parent, ctx) {
   const components = [];
   for (const variant of spec.variants) components.push(await dsBuild(Object.assign({}, variant, { type: "component" }), parent, ctx));
-  const set = figma.combineAsVariants(components, parent);
+  const set = dsTrack(figma.combineAsVariants(components, parent), ctx);
   set.name = spec.name;
   await dsStyleContainer(set, {
     layout: spec.layout || "H",
@@ -2333,6 +2354,7 @@ async function dsBuild(spec, parent, ctx) {
   else if (spec.type === "svg") node = figma.createNodeFromSvg(spec.svg);
   else if (spec.type === "image") node = figma.createRectangle();
   else throw new Error(`Unknown node type "${spec.type}".`);
+  dsTrack(node, ctx);
 
   if (spec.type === "frame" || spec.type === "component") {
     node.resize(spec.w || 100, spec.h || 100);
@@ -2401,24 +2423,31 @@ async function dsBuild(spec, parent, ctx) {
 async function dsRender(input) {
   const parent = input.parentId ? await dsNode(input.parentId) : figma.currentPage;
   if (parent.type === "PAGE") await parent.loadAsync();
-  const ctx = { keys: {}, count: 0, root: null };
+  const ctx = { keys: {}, count: 0, root: null, created: [] };
   try {
     const node = await dsBuild(input.tree, parent, ctx);
     if (input.index !== undefined && "insertChild" in parent) parent.insertChild(input.index, node);
     return { rootId: node.id, name: node.name, type: node.type, width: node.width, height: node.height, count: ctx.count, keys: ctx.keys };
   } catch (error) {
-    if (ctx.root && !ctx.root.removed) ctx.root.remove();
+    for (const node of ctx.created.slice().reverse()) {
+      if (!node.removed) node.remove();
+    }
     throw error;
   }
 }
 
 async function dsIndex(input) {
   const pages = input.pageId ? [await dsNode(input.pageId)] : figma.root.children;
+  if (!input.pageId) dsState.components.clear();
   const names = [];
+  const duplicates = new Set();
+  const seen = new Set();
   for (const page of pages) {
     await page.loadAsync();
     for (const node of page.findAllWithCriteria({ types: ["COMPONENT", "COMPONENT_SET"] })) {
       if (node.type === "COMPONENT" && node.parent && node.parent.type === "COMPONENT_SET") continue;
+      if (seen.has(node.name)) { duplicates.add(node.name); continue; }
+      seen.add(node.name);
       dsState.components.set(node.name, node.id);
       names.push(node.name);
     }
@@ -2426,7 +2455,7 @@ async function dsIndex(input) {
   dsState.vars = null;
   dsState.textStyles = null;
   dsState.effectStyles = null;
-  return { count: names.length, names, ids: Object.fromEntries(dsState.components) };
+  return { count: names.length, names, ids: Object.fromEntries(dsState.components), duplicates: [...duplicates] };
 }
 
 async function dsTextStyles(input) {
