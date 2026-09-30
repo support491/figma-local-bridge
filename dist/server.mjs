@@ -31297,6 +31297,24 @@ function isAllowedBrowserOrigin(origin) {
     return false;
   }
 }
+
+// Only loopback Host headers reach the bridge; blocks DNS-rebinding pages that resolve to 127.0.0.1.
+function isLoopbackHost(hostHeader) {
+  if (typeof hostHeader !== "string") return false;
+  const match = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(hostHeader.trim().toLowerCase());
+  if (!match) return false;
+  const hostname = match[1];
+  const hostPort = match[2] ?? "80";
+  return ["localhost", "127.0.0.1", String(host).toLowerCase()].includes(hostname) && hostPort === String(port);
+}
+
+// Command routes are for local MCP processes only: they never send Origin and always send JSON.
+// Rejecting Origin (including the "null" origin sandboxed iframes use) and non-JSON bodies means a web
+// page cannot drive Figma commands with a no-cors or text/plain request.
+function isJsonRequest(request) {
+  const type = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+  return type === "application/json";
+}
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -31484,6 +31502,7 @@ function validateInternalCommentRequest(body) {
   return { path: `${parsed.pathname}${parsed.search}`, method, body: body.body };
 }
 var bridge = http.createServer(async (request, response) => {
+  if (!isLoopbackHost(request.headers.host)) return json2(response, 403, { error: "Unexpected Host header for this local bridge." });
   const origin = request.headers.origin;
   if (!isAllowedBrowserOrigin(origin)) return json2(response, 403, { error: "Browser origin is not permitted by this local bridge." });
   if (origin) response.bridgeCorsOrigin = origin;
@@ -31525,6 +31544,8 @@ var bridge = http.createServer(async (request, response) => {
       return json2(response, 200, { data: await ownerFigmaCommentsRequest(operation.path, { method: operation.method, body: operation.body }) });
     }
     if (request.method === "POST" && url2.pathname === "/v1/mcp-command") {
+      if (origin) return json2(response, 403, { error: "Internal bridge route." });
+      if (!isJsonRequest(request)) return json2(response, 415, { error: "Command requests must use Content-Type: application/json." });
       const body = await readJson(request);
       if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 200) return json2(response, 400, { error: "A valid command name is required." });
       if (!body.input || typeof body.input !== "object" || Array.isArray(body.input)) return json2(response, 400, { error: "Command input must be an object." });
