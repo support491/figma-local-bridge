@@ -11,6 +11,7 @@ const mutatingCommands = new Set([
   "applyCopyUpdates", "setTextFrame", "splitTextBlock",
   "archiveNodes", "composeFrame", "copyStyleFromNode", "copyImageFill", "placeLocalImage",
   "createComponentInstance", "applyDesignStyle",
+  "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1846,6 +1847,7 @@ async function execute(name, input) {
     return { mutatedNodeIds: [node.id], node: serializeNode(node), layoutMode: node.layoutMode, itemSpacing: node.itemSpacing };
   }
 
+  if (name.startsWith("ds")) return executeDesignSystem(name, input);
   throw new Error(`Unsupported command: ${name}`);
 }
 
@@ -1853,3 +1855,770 @@ figma.ui.onmessage = async (message) => {
   if (message.type === "start") startBridge();
   if (message.type === "resize" && [250, 540].includes(message.height)) figma.ui.resize(380, message.height);
 };
+
+// ===== Design-system extension (branch claude/design-system-commands) =====
+// Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
+// They create/index components, component sets, text/effect styles, number variables,
+// pages and auto-layout node trees, so a design system can be built over the local bridge.
+const DS_VERSION = "ds-8";
+const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
+
+async function dsNode(id) {
+  const node = await figma.getNodeByIdAsync(id);
+  if (!node) throw new Error(`Node ${id} was not found.`);
+  return node;
+}
+
+async function dsVars() {
+  if (!dsState.vars) {
+    const map = new Map();
+    for (const variable of await figma.variables.getLocalVariablesAsync()) {
+      map.set(variable.name, variable);
+      map.set(variable.id, variable);
+    }
+    dsState.vars = map;
+  }
+  return dsState.vars;
+}
+
+async function dsVar(ref) {
+  const variable = (await dsVars()).get(ref);
+  if (!variable) throw new Error(`Unknown variable "${ref}".`);
+  return variable;
+}
+
+async function dsTextStyleMap() {
+  if (!dsState.textStyles) {
+    const map = new Map();
+    for (const style of await figma.getLocalTextStylesAsync()) { map.set(style.name, style); map.set(style.id, style); }
+    dsState.textStyles = map;
+  }
+  return dsState.textStyles;
+}
+
+async function dsEffectStyleMap() {
+  if (!dsState.effectStyles) {
+    const map = new Map();
+    for (const style of await figma.getLocalEffectStylesAsync()) { map.set(style.name, style); map.set(style.id, style); }
+    dsState.effectStyles = map;
+  }
+  return dsState.effectStyles;
+}
+
+async function dsFont(fontName) {
+  const key = `${fontName.family}::${fontName.style}`;
+  if (!dsState.fonts.has(key)) {
+    await figma.loadFontAsync(fontName);
+    dsState.fonts.add(key);
+  }
+}
+
+async function dsLoadTextNodeFonts(node) {
+  if (node.characters.length === 0) { if (node.fontName !== figma.mixed) await dsFont(node.fontName); return; }
+  for (const font of node.getRangeAllFontNames(0, node.characters.length)) await dsFont(font);
+}
+
+async function dsPaint(spec) {
+  if (spec === null || spec === undefined || spec === false) return null;
+  const source = typeof spec === "string" ? (spec.startsWith("#") ? { hex: spec } : { var: spec }) : spec;
+  const opacity = source.opacity === undefined ? 1 : source.opacity;
+  if (source.var) {
+    const variable = await dsVar(source.var);
+    const bound = figma.variables.setBoundVariableForPaint({ type: "SOLID", color: { r: 0, g: 0, b: 0 }, opacity }, "color", variable);
+    return Object.assign({}, bound, { opacity });
+  }
+  if (!/^#[0-9a-fA-F]{6}$/.test(source.hex || "")) throw new Error(`Invalid colour ${JSON.stringify(spec)}.`);
+  return { type: "SOLID", color: hexToColor(source.hex), opacity };
+}
+
+async function dsPaints(spec) {
+  const paint = await dsPaint(spec);
+  return paint ? [paint] : [];
+}
+
+async function dsNumber(node, field, value) {
+  if (value === undefined || value === null) return;
+  if (typeof value === "object") {
+    if (!value.var) throw new Error(`Invalid numeric value for ${field}.`);
+    node.setBoundVariable(field, await dsVar(value.var));
+  } else {
+    node[field] = value;
+  }
+}
+
+function dsEffect(effect) {
+  const color = hexToColor(effect.hex || "#000000");
+  const result = {
+    type: effect.type || "DROP_SHADOW",
+    color: { r: color.r, g: color.g, b: color.b, a: effect.opacity === undefined ? 0.1 : effect.opacity },
+    offset: { x: effect.x || 0, y: effect.y || 0 },
+    radius: effect.blur || 0,
+    spread: effect.spread || 0,
+    visible: true,
+    blendMode: "NORMAL",
+  };
+  if (result.type === "DROP_SHADOW") result.showShadowBehindNode = false;
+  return result;
+}
+
+async function dsApplyEffects(node, spec) {
+  if (spec.effect) {
+    const style = (await dsEffectStyleMap()).get(spec.effect);
+    if (!style) throw new Error(`Unknown effect style "${spec.effect}".`);
+    await node.setEffectStyleIdAsync(style.id);
+  } else if (spec.effects) {
+    node.effects = spec.effects.map(dsEffect);
+  }
+}
+
+const DS_ALIGN = { start: "MIN", center: "CENTER", end: "MAX", between: "SPACE_BETWEEN" };
+const DS_CROSS = { start: "MIN", center: "CENTER", end: "MAX", baseline: "BASELINE" };
+
+function dsPad(pad) {
+  if (pad === undefined || pad === null) return [0, 0, 0, 0];
+  if (!Array.isArray(pad)) return [pad, pad, pad, pad];
+  if (pad.length === 2) return [pad[0], pad[1], pad[0], pad[1]];
+  if (pad.length === 4) return pad;
+  throw new Error("pad must be a number, [vertical, horizontal] or [top, right, bottom, left].");
+}
+
+function dsIsAutoLayout(node) {
+  return Boolean(node) && "layoutMode" in node && node.layoutMode !== "NONE";
+}
+
+async function dsStyleContainer(frame, spec) {
+  if (spec.name) frame.name = spec.name;
+  if (spec.layout === "H" || spec.layout === "V") {
+    frame.layoutMode = spec.layout === "H" ? "HORIZONTAL" : "VERTICAL";
+    await dsNumber(frame, "itemSpacing", spec.gap || 0);
+    const [top, right, bottom, left] = dsPad(spec.pad);
+    await dsNumber(frame, "paddingTop", top);
+    await dsNumber(frame, "paddingRight", right);
+    await dsNumber(frame, "paddingBottom", bottom);
+    await dsNumber(frame, "paddingLeft", left);
+    frame.primaryAxisAlignItems = DS_ALIGN[spec.align || "start"];
+    frame.counterAxisAlignItems = DS_CROSS[spec.cross || "start"];
+    if (spec.wrap) {
+      frame.layoutWrap = "WRAP";
+      if (spec.wrapGap !== undefined) frame.counterAxisSpacing = spec.wrapGap;
+    }
+  } else if ("layoutMode" in frame && frame.type !== "COMPONENT_SET") {
+    frame.layoutMode = "NONE";
+  }
+  frame.fills = await dsPaints(spec.fill);
+  if (spec.stroke) {
+    frame.strokes = await dsPaints(spec.stroke);
+    frame.strokeAlign = spec.strokeAlign || "INSIDE";
+    if (spec.strokeSides) {
+      const sides = spec.strokeSides;
+      frame.strokeTopWeight = sides.top || 0;
+      frame.strokeRightWeight = sides.right || 0;
+      frame.strokeBottomWeight = sides.bottom || 0;
+      frame.strokeLeftWeight = sides.left || 0;
+    } else {
+      frame.strokeWeight = spec.strokeW === undefined ? 1 : spec.strokeW;
+    }
+    if (spec.dash) frame.dashPattern = spec.dash;
+  } else {
+    frame.strokes = [];
+  }
+  await dsRadius(frame, spec);
+  if ("clipsContent" in frame) frame.clipsContent = Boolean(spec.clip);
+  if (spec.opacity !== undefined) frame.opacity = spec.opacity;
+  await dsApplyEffects(frame, spec);
+}
+
+async function dsRadius(node, spec) {
+  if (spec.radius !== undefined) {
+    if (typeof spec.radius === "object") {
+      const variable = await dsVar(spec.radius.var);
+      for (const field of ["topLeftRadius", "topRightRadius", "bottomLeftRadius", "bottomRightRadius"]) node.setBoundVariable(field, variable);
+    } else {
+      node.cornerRadius = spec.radius;
+    }
+  }
+  if (spec.radii) {
+    node.topLeftRadius = spec.radii[0];
+    node.topRightRadius = spec.radii[1];
+    node.bottomRightRadius = spec.radii[2];
+    node.bottomLeftRadius = spec.radii[3];
+  }
+}
+
+function dsSize(node, spec, parent) {
+  const parentAutoLayout = dsIsAutoLayout(parent);
+  if (spec.abs && parentAutoLayout) node.layoutPositioning = "ABSOLUTE";
+  const inFlow = parentAutoLayout && !spec.abs;
+  const selfAutoLayout = dsIsAutoLayout(node);
+  const keepDefault = node.type === "INSTANCE" ? "keep" : selfAutoLayout ? "hug" : "keep";
+  const sizeW = spec.sizeW || (spec.w !== undefined ? "fixed" : keepDefault);
+  const sizeH = spec.sizeH || (spec.h !== undefined ? "fixed" : keepDefault);
+
+  if (node.type === "TEXT") {
+    if (sizeW === "fill" && inFlow) {
+      node.layoutSizingHorizontal = "FILL";
+      node.textAutoResize = "HEIGHT";
+    } else if (sizeW === "fixed" && spec.w !== undefined) {
+      node.resize(spec.w, Math.max(1, node.height));
+      node.textAutoResize = "HEIGHT";
+    } else {
+      node.textAutoResize = "WIDTH_AND_HEIGHT";
+    }
+    if (spec.grow && inFlow) node.layoutGrow = 1;
+  } else {
+    if (sizeW === "fixed" || sizeH === "fixed") {
+      const width = sizeW === "fixed" && spec.w !== undefined ? spec.w : node.width;
+      const height = sizeH === "fixed" && spec.h !== undefined ? spec.h : node.height;
+      if ("resize" in node) node.resize(Math.max(0.01, width), Math.max(0.01, height));
+    }
+    if (selfAutoLayout || inFlow) {
+      if (sizeW === "fill" && inFlow) node.layoutSizingHorizontal = "FILL";
+      else if (sizeW === "hug" && selfAutoLayout) node.layoutSizingHorizontal = "HUG";
+      else if (sizeW === "fixed") node.layoutSizingHorizontal = "FIXED";
+      if (sizeH === "fill" && inFlow) node.layoutSizingVertical = "FILL";
+      else if (sizeH === "hug" && selfAutoLayout) node.layoutSizingVertical = "HUG";
+      else if (sizeH === "fixed") node.layoutSizingVertical = "FIXED";
+      if (spec.minW !== undefined) node.minWidth = spec.minW;
+      if (spec.maxW !== undefined) node.maxWidth = spec.maxW;
+      if (spec.minH !== undefined) node.minHeight = spec.minH;
+      if (spec.maxH !== undefined) node.maxHeight = spec.maxH;
+    }
+  }
+  if (!inFlow) {
+    if (spec.x !== undefined) node.x = spec.x;
+    if (spec.y !== undefined) node.y = spec.y;
+  }
+  if (spec.constraints && "constraints" in node) node.constraints = spec.constraints;
+}
+
+function dsRecord(node, spec, ctx) {
+  ctx.count += 1;
+  if (!ctx.root) ctx.root = node;
+  if (spec.key) ctx.keys[spec.key] = node.id;
+}
+
+async function dsResolveComponent(ref, variant) {
+  let node = null;
+  if (typeof ref === "string" && /^\d+:\d+$/.test(ref)) node = await figma.getNodeByIdAsync(ref);
+  else {
+    const id = dsState.components.get(ref);
+    if (id) node = await figma.getNodeByIdAsync(id);
+  }
+  if (!node) throw new Error(`Component "${ref}" is not indexed. Run dsIndex or create it first.`);
+  if (node.type === "COMPONENT_SET") {
+    if (!variant) return node.defaultVariant;
+    const match = node.children.find((child) => Object.entries(variant).every(([key, value]) => child.variantProperties && child.variantProperties[key] === value));
+    if (!match) throw new Error(`No variant ${JSON.stringify(variant)} in "${ref}".`);
+    return match;
+  }
+  if (node.type !== "COMPONENT") throw new Error(`"${ref}" is not a component.`);
+  return node;
+}
+
+function dsFindNamed(root, name) {
+  const found = [];
+  const visit = (node) => {
+    if (node !== root && node.name === name) found.push(node);
+    if (node.type === "INSTANCE" && node !== root) return;
+    if ("children" in node) for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return found;
+}
+
+async function dsBindProperties(owner, props, variants) {
+  const keys = {};
+  for (const prop of props) {
+    let defaultValue = prop.default;
+    if (prop.type === "INSTANCE_SWAP") defaultValue = (await dsResolveComponent(prop.default)).id;
+    const options = prop.preferred ? { preferredValues: await Promise.all(prop.preferred.map(async (ref) => ({ type: "COMPONENT", key: (await dsResolveComponent(ref)).key }))) } : undefined;
+    const key = owner.addComponentProperty(prop.name, prop.type, defaultValue, options);
+    keys[prop.name] = key;
+    const field = prop.type === "TEXT" ? "characters" : prop.type === "BOOLEAN" ? "visible" : "mainComponent";
+    let bound = 0;
+    for (const variant of variants) {
+      for (const target of dsFindNamed(variant, prop.bind || prop.name)) {
+        target.componentPropertyReferences = Object.assign({}, target.componentPropertyReferences || {}, { [field]: key });
+        bound += 1;
+      }
+    }
+    if (bound === 0) throw new Error(`Property "${prop.name}" did not match a layer named "${prop.bind || prop.name}".`);
+  }
+  return keys;
+}
+
+async function dsSetInstanceProperties(instance, props, label) {
+  const definitions = instance.componentProperties;
+  const values = {};
+  for (const [name, value] of Object.entries(props)) {
+    const fullName = Object.keys(definitions).find((key) => key === name || key.split("#")[0] === name);
+    if (!fullName) throw new Error(`"${label}" has no property "${name}".`);
+    values[fullName] = definitions[fullName].type === "INSTANCE_SWAP" ? (await dsResolveComponent(value)).id : value;
+  }
+  // Swapping replaces the nested instance, dropping its colour override and layer name.
+  // Skip no-op swaps and carry the Glyph colour and name across real ones.
+  const holderFor = (key) => instance.findOne((node) => node.type === "INSTANCE" && node.componentPropertyReferences && node.componentPropertyReferences.mainComponent === key);
+  const saved = new Map();
+  for (const key of Object.keys(values)) {
+    if (definitions[key].type !== "INSTANCE_SWAP") continue;
+    if (definitions[key].value === values[key]) { delete values[key]; continue; }
+    const holder = holderFor(key);
+    const glyph = holder && holder.findOne((node) => node.name === "Glyph");
+    if (holder) saved.set(key, { name: holder.name, strokes: glyph ? glyph.strokes : null });
+  }
+  instance.setProperties(values);
+  for (const [key, before] of saved) {
+    const holder = holderFor(key);
+    if (!holder) continue;
+    holder.name = before.name;
+    const glyph = holder.findOne((node) => node.name === "Glyph");
+    if (glyph && before.strokes) glyph.strokes = before.strokes;
+  }
+}
+
+async function dsBuildText(spec, parent, ctx) {
+  const text = figma.createText();
+  parent.appendChild(text);
+  dsRecord(text, spec, ctx);
+  let style = null;
+  if (spec.style) {
+    style = (await dsTextStyleMap()).get(spec.style);
+    if (!style) throw new Error(`Unknown text style "${spec.style}".`);
+    await dsFont(style.fontName);
+    text.fontName = style.fontName;
+  } else {
+    const font = { family: (spec.font && spec.font.family) || "Source Sans 3", style: (spec.font && spec.font.style) || "Regular" };
+    await dsFont(font);
+    text.fontName = font;
+  }
+  text.characters = spec.chars === undefined ? "" : String(spec.chars);
+  if (style) {
+    await text.setTextStyleIdAsync(style.id);
+  } else if (spec.font) {
+    if (spec.font.size) text.fontSize = spec.font.size;
+    if (spec.font.lh) text.lineHeight = { unit: "PIXELS", value: spec.font.lh };
+    if (spec.font.ls !== undefined) text.letterSpacing = { unit: "PIXELS", value: spec.font.ls };
+    if (spec.font.textCase) text.textCase = spec.font.textCase;
+  }
+  if (spec.fill !== undefined) text.fills = await dsPaints(spec.fill);
+  for (const span of spec.spans || []) {
+    if (span.style) {
+      const spanStyle = (await dsTextStyleMap()).get(span.style);
+      if (!spanStyle) throw new Error(`Unknown text style "${span.style}".`);
+      await dsFont(spanStyle.fontName);
+      await text.setRangeTextStyleIdAsync(span.start, span.end, spanStyle.id);
+    }
+    if (span.font) {
+      const current = text.getRangeFontName(span.start, span.start + 1);
+      const font = { family: span.font.family || current.family, style: span.font.style || current.style };
+      await dsFont(font);
+      text.setRangeFontName(span.start, span.end, font);
+      if (span.font.size) text.setRangeFontSize(span.start, span.end, span.font.size);
+    }
+    if (span.fill) text.setRangeFills(span.start, span.end, await dsPaints(span.fill));
+    if (span.underline) text.setRangeTextDecoration(span.start, span.end, "UNDERLINE");
+  }
+  text.name = spec.name || text.characters.slice(0, 60) || "Text";
+  if (spec.align) text.textAlignHorizontal = { left: "LEFT", center: "CENTER", right: "RIGHT" }[spec.align];
+  if (spec.textCase) text.textCase = spec.textCase;
+  if (spec.opacity !== undefined) text.opacity = spec.opacity;
+  dsSize(text, spec, parent);
+  return text;
+}
+
+async function dsBuildInstance(spec, parent, ctx) {
+  const component = await dsResolveComponent(spec.of, spec.variant);
+  const instance = component.createInstance();
+  parent.appendChild(instance);
+  dsRecord(instance, spec, ctx);
+  if (spec.name) instance.name = spec.name;
+  if (spec.props) await dsSetInstanceProperties(instance, spec.props, spec.of);
+  for (const override of spec.set || []) {
+    const targets = instance.findAll((node) => node.name === override.name);
+    if (targets.length === 0 && !override.optional) throw new Error(`"${spec.of}" has no layer named "${override.name}".`);
+    for (const target of targets) {
+      if (override.chars !== undefined && target.type === "TEXT") {
+        await dsLoadTextNodeFonts(target);
+        target.characters = String(override.chars);
+      }
+      if (override.fill !== undefined) target.fills = await dsPaints(override.fill);
+      if (override.stroke !== undefined) target.strokes = await dsPaints(override.stroke);
+      if (override.visible !== undefined) target.visible = override.visible;
+      if (override.props && target.type === "INSTANCE") await dsSetInstanceProperties(target, override.props, override.name);
+    }
+  }
+  if (spec.iconColor !== undefined) {
+    const paints = await dsPaints(spec.iconColor);
+    for (const glyph of instance.findAll((node) => node.name === "Glyph")) glyph.strokes = paints;
+  }
+  if (spec.scale && spec.scale !== 1) instance.rescale(spec.scale);
+  if (spec.exposed) instance.isExposedInstance = true;
+  if (spec.effect || spec.effects) await dsApplyEffects(instance, spec);
+  if (spec.opacity !== undefined) instance.opacity = spec.opacity;
+  dsSize(instance, spec, parent);
+  return instance;
+}
+
+async function dsBuildIcon(spec, parent, ctx) {
+  const component = figma.createComponent();
+  component.name = spec.name;
+  component.resize(24, 24);
+  component.fills = [];
+  component.clipsContent = false;
+  parent.appendChild(component);
+  dsRecord(component, spec, ctx);
+  const source = figma.createNodeFromSvg(spec.svg);
+  component.appendChild(source);
+  source.x = 0;
+  source.y = 0;
+  const pieces = source.children.slice();
+  if (pieces.length === 0) throw new Error(`Icon ${spec.name} has no drawable paths.`);
+  const glyph = pieces.length === 1 ? pieces[0] : figma.flatten(pieces, source);
+  const gx = glyph.x;
+  const gy = glyph.y;
+  component.appendChild(glyph);
+  glyph.x = gx;
+  glyph.y = gy;
+  source.remove();
+  glyph.name = "Glyph";
+  glyph.fills = [];
+  glyph.strokes = await dsPaints(spec.color || "text/secondary");
+  glyph.strokeWeight = 2;
+  glyph.strokeCap = "ROUND";
+  glyph.strokeJoin = "ROUND";
+  glyph.constraints = { horizontal: "SCALE", vertical: "SCALE" };
+  if (spec.description) component.description = spec.description;
+  dsState.components.set(spec.name, component.id);
+  dsSize(component, { x: spec.x, y: spec.y }, parent);
+  return component;
+}
+
+async function dsBuildComponentSet(spec, parent, ctx) {
+  const components = [];
+  for (const variant of spec.variants) components.push(await dsBuild(Object.assign({}, variant, { type: "component" }), parent, ctx));
+  const set = figma.combineAsVariants(components, parent);
+  set.name = spec.name;
+  await dsStyleContainer(set, {
+    layout: spec.layout || "H",
+    gap: spec.gap === undefined ? 20 : spec.gap,
+    pad: spec.pad === undefined ? 24 : spec.pad,
+    align: "start",
+    cross: spec.cross || "start",
+    wrap: spec.wrap,
+    wrapGap: spec.wrapGap === undefined ? (spec.gap === undefined ? 20 : spec.gap) : spec.wrapGap,
+    fill: spec.fill === undefined ? { hex: "#FFFFFF", opacity: 0 } : spec.fill,
+    stroke: spec.setStroke === undefined ? "#9747FF" : spec.setStroke,
+    dash: [10, 5],
+    radius: 5,
+  });
+  dsSize(set, { sizeW: spec.sizeW || "hug", sizeH: "hug", w: spec.w }, parent);
+  if (spec.props) await dsBindProperties(set, spec.props, set.children);
+  if (spec.description) set.description = spec.description;
+  if (spec.key) ctx.keys[spec.key] = set.id;
+  dsState.components.set(spec.name, set.id);
+  return set;
+}
+
+async function dsBuild(spec, parent, ctx) {
+  if (spec.type === "text") return dsBuildText(spec, parent, ctx);
+  if (spec.type === "instance") return dsBuildInstance(spec, parent, ctx);
+  if (spec.type === "icon") return dsBuildIcon(spec, parent, ctx);
+  if (spec.type === "componentSet") return dsBuildComponentSet(spec, parent, ctx);
+
+  let node;
+  if (spec.type === "frame") node = figma.createFrame();
+  else if (spec.type === "component") node = figma.createComponent();
+  else if (spec.type === "rect") node = figma.createRectangle();
+  else if (spec.type === "ellipse") node = figma.createEllipse();
+  else if (spec.type === "svg") node = figma.createNodeFromSvg(spec.svg);
+  else if (spec.type === "image") node = figma.createRectangle();
+  else throw new Error(`Unknown node type "${spec.type}".`);
+
+  if (spec.type === "frame" || spec.type === "component") {
+    node.resize(spec.w || 100, spec.h || 100);
+    await dsStyleContainer(node, spec);
+  } else if (spec.type === "rect" || spec.type === "ellipse") {
+    node.resize(Math.max(0.01, spec.w || 1), Math.max(0.01, spec.h || 1));
+    node.name = spec.name || (spec.type === "rect" ? "Rectangle" : "Ellipse");
+    node.fills = await dsPaints(spec.fill);
+    if (spec.stroke) {
+      node.strokes = await dsPaints(spec.stroke);
+      node.strokeWeight = spec.strokeW === undefined ? 1 : spec.strokeW;
+      node.strokeAlign = spec.strokeAlign || "INSIDE";
+    }
+    if (spec.type === "rect") await dsRadius(node, spec);
+    if (spec.opacity !== undefined) node.opacity = spec.opacity;
+    await dsApplyEffects(node, spec);
+  } else if (spec.type === "svg") {
+    node.name = spec.name || "Vector";
+    node.fills = [];
+  } else if (spec.type === "image") {
+    node.resize(spec.w, spec.h);
+    node.name = spec.name || "Image";
+    const image = figma.createImage(figma.base64Decode(spec.base64));
+    node.fills = [{ type: "IMAGE", imageHash: image.hash, scaleMode: spec.scaleMode || "FIT" }];
+    await dsRadius(node, spec);
+  }
+
+  parent.appendChild(node);
+  dsRecord(node, spec, ctx);
+  if (spec.type === "svg") dsSize(node, Object.assign({}, spec, { sizeW: spec.sizeW || "keep", sizeH: spec.sizeH || "keep", w: undefined, h: undefined }), parent);
+  else dsSize(node, spec, parent);
+
+  const built = [];
+  for (const child of spec.children || []) built.push(await dsBuild(child, node, ctx));
+  (spec.children || []).forEach((child, index) => {
+    const childNode = built[index];
+    if (child.fit === "parent") {
+      childNode.resize(node.width, node.height);
+      childNode.x = 0;
+      childNode.y = 0;
+      childNode.constraints = { horizontal: "STRETCH", vertical: "STRETCH" };
+    }
+    if (child.stretchH) {
+      const top = child.stretchH.top || 0;
+      const bottom = child.stretchH.bottom || 0;
+      childNode.resize(childNode.width, Math.max(0.01, node.height - top - bottom));
+      childNode.y = top;
+      childNode.constraints = { horizontal: "MIN", vertical: "STRETCH" };
+    }
+    if (child.anchor) {
+      if (child.anchor.right !== undefined) childNode.x = node.width - child.anchor.right - childNode.width;
+      if (child.anchor.bottom !== undefined) childNode.y = node.height - child.anchor.bottom - childNode.height;
+      if (child.anchor.centerX) childNode.x = Math.round((node.width - childNode.width) / 2);
+      childNode.constraints = { horizontal: child.anchor.right !== undefined ? "MAX" : child.anchor.centerX ? "CENTER" : "MIN", vertical: child.anchor.bottom !== undefined ? "MAX" : "MIN" };
+    }
+  });
+
+  if (spec.type === "component") {
+    if (spec.description) node.description = spec.description;
+    if (spec.props) await dsBindProperties(node, spec.props, [node]);
+    if (spec.register !== false && spec.name && !/=/.test(spec.name)) dsState.components.set(spec.name, node.id);
+  }
+  return node;
+}
+
+async function dsRender(input) {
+  const parent = input.parentId ? await dsNode(input.parentId) : figma.currentPage;
+  if (parent.type === "PAGE") await parent.loadAsync();
+  const ctx = { keys: {}, count: 0, root: null };
+  try {
+    const node = await dsBuild(input.tree, parent, ctx);
+    if (input.index !== undefined && "insertChild" in parent) parent.insertChild(input.index, node);
+    return { rootId: node.id, name: node.name, type: node.type, width: node.width, height: node.height, count: ctx.count, keys: ctx.keys };
+  } catch (error) {
+    if (ctx.root && !ctx.root.removed) ctx.root.remove();
+    throw error;
+  }
+}
+
+async function dsIndex(input) {
+  const pages = input.pageId ? [await dsNode(input.pageId)] : figma.root.children;
+  const names = [];
+  for (const page of pages) {
+    await page.loadAsync();
+    for (const node of page.findAllWithCriteria({ types: ["COMPONENT", "COMPONENT_SET"] })) {
+      if (node.type === "COMPONENT" && node.parent && node.parent.type === "COMPONENT_SET") continue;
+      dsState.components.set(node.name, node.id);
+      names.push(node.name);
+    }
+  }
+  dsState.vars = null;
+  dsState.textStyles = null;
+  dsState.effectStyles = null;
+  return { count: names.length, names, ids: Object.fromEntries(dsState.components) };
+}
+
+async function dsTextStyles(input) {
+  const styles = await dsTextStyleMap();
+  const result = [];
+  for (const spec of input.styles) {
+    const font = { family: spec.family, style: spec.style };
+    await dsFont(font);
+    let style = styles.get(spec.name);
+    if (!style) style = figma.createTextStyle();
+    style.name = spec.name;
+    style.fontName = font;
+    style.fontSize = spec.size;
+    style.lineHeight = { unit: "PIXELS", value: spec.lh };
+    style.letterSpacing = { unit: "PIXELS", value: spec.ls || 0 };
+    style.textCase = spec.textCase || "ORIGINAL";
+    if (spec.description) style.description = spec.description;
+    result.push({ id: style.id, name: style.name });
+  }
+  dsState.textStyles = null;
+  return { styles: result };
+}
+
+async function dsEffectStyles(input) {
+  const styles = await dsEffectStyleMap();
+  const result = [];
+  for (const spec of input.styles) {
+    let style = styles.get(spec.name);
+    if (!style) style = figma.createEffectStyle();
+    style.name = spec.name;
+    style.effects = spec.effects.map(dsEffect);
+    if (spec.description) style.description = spec.description;
+    result.push({ id: style.id, name: style.name });
+  }
+  dsState.effectStyles = null;
+  return { styles: result };
+}
+
+async function dsNumberVars(input) {
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  let collection = collections.find((candidate) => candidate.name === input.collection);
+  if (!collection) collection = figma.variables.createVariableCollection(input.collection);
+  const existing = await Promise.all(collection.variableIds.map((id) => figma.variables.getVariableByIdAsync(id)));
+  const byName = new Map(existing.filter(Boolean).map((variable) => [variable.name, variable]));
+  const result = [];
+  for (const spec of input.vars) {
+    let variable = byName.get(spec.name);
+    if (!variable) variable = figma.variables.createVariable(spec.name, collection, "FLOAT");
+    variable.setValueForMode(collection.defaultModeId, spec.value);
+    if (spec.scopes) variable.scopes = spec.scopes;
+    result.push({ id: variable.id, name: variable.name, value: spec.value });
+  }
+  dsState.vars = null;
+  return { collection: { id: collection.id, name: collection.name }, vars: result };
+}
+
+async function dsPages(input) {
+  for (const spec of input.ensure || []) {
+    let page = spec.id ? await figma.getNodeByIdAsync(spec.id) : figma.root.children.find((candidate) => candidate.name === spec.name);
+    if (!page) page = figma.createPage();
+    page.name = spec.name;
+    if (spec.background) page.backgrounds = [solidPaint(spec.background)];
+  }
+  (input.order || []).forEach((name, index) => {
+    const page = figma.root.children.find((candidate) => candidate.name === name);
+    if (page) figma.root.insertChild(index, page);
+  });
+  return { pages: figma.root.children.map((page) => ({ id: page.id, name: page.name })) };
+}
+
+async function dsMove(input) {
+  const parent = await dsNode(input.parentId);
+  if (parent.type === "PAGE") await parent.loadAsync();
+  const moved = [];
+  for (const id of input.ids) {
+    const node = await dsNode(id);
+    if (input.index !== undefined) parent.insertChild(input.index, node);
+    else parent.appendChild(node);
+    if (input.x !== undefined) node.x = input.x;
+    if (input.y !== undefined) node.y = input.y;
+    moved.push({ id: node.id, name: node.name });
+  }
+  return { moved };
+}
+
+async function dsDelete(input) {
+  const removed = [];
+  for (const id of input.ids) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) continue;
+    removed.push({ id, name: node.name, type: node.type });
+    node.remove();
+  }
+  return { removed };
+}
+
+async function dsInspect(input) {
+  const node = await dsNode(input.nodeId);
+  const walk = (current, depth) => {
+    const item = { id: current.id, name: current.name, type: current.type };
+    if ("width" in current) { item.w = Math.round(current.width); item.h = Math.round(current.height); }
+    if ("x" in current) { item.x = Math.round(current.x); item.y = Math.round(current.y); }
+    if (current.type === "INSTANCE" && current.componentProperties) item.props = Object.fromEntries(Object.entries(current.componentProperties).map(([key, value]) => [key, value.value]));
+    if (depth < (input.depth || 2) && "children" in current) item.children = current.children.map((child) => walk(child, depth + 1));
+    return item;
+  };
+  return walk(node, 0);
+}
+
+async function dsColorVars(input) {
+  const result = [];
+  for (const spec of input.vars) {
+    const variable = await dsVar(spec.name);
+    const collection = await figma.variables.getVariableCollectionByIdAsync(variable.variableCollectionId);
+    const color = hexToColor(spec.hex);
+    variable.setValueForMode(collection.defaultModeId, { r: color.r, g: color.g, b: color.b, a: spec.alpha === undefined ? 1 : spec.alpha });
+    if (spec.description) variable.description = spec.description;
+    result.push({ id: variable.id, name: variable.name });
+  }
+  dsState.vars = null;
+  return { vars: result };
+}
+
+async function dsVarName(paint) {
+  const alias = paint && paint.boundVariables && paint.boundVariables.color;
+  if (!alias) return null;
+  const variable = await figma.variables.getVariableByIdAsync(alias.id);
+  return variable ? variable.name : alias.id;
+}
+
+async function dsReadGlyphs(input) {
+  const root = await dsNode(input.nodeId);
+  const out = [];
+  const holders = root.type === "COMPONENT_SET" ? root.children : [root];
+  for (const holder of holders) {
+    for (const layer of dsFindNamed(holder, input.layer)) {
+      const glyph = layer.type === "INSTANCE" ? layer.findOne((n) => n.name === "Glyph") : null;
+      const paint = glyph && glyph.strokes && glyph.strokes[0];
+      out.push({ variant: holder.name, layer: layer.id, glyph: glyph ? glyph.id : null, color: paint ? (await dsVarName(paint)) || JSON.stringify(paint.color) : null });
+    }
+  }
+  return { glyphs: out };
+}
+
+async function dsRecolorGlyphs(input) {
+  const root = await dsNode(input.nodeId);
+  const holders = root.type === "COMPONENT_SET" ? root.children : [root];
+  let changed = 0;
+  for (const holder of holders) {
+    for (const rule of input.rules) {
+      if (rule.variant && !Object.entries(rule.variant).every(([key, value]) => holder.variantProperties && holder.variantProperties[key] === value)) continue;
+      for (const layer of dsFindNamed(holder, rule.layer)) {
+        const glyphs = layer.type === "INSTANCE" ? layer.findAll((n) => n.name === "Glyph") : [];
+        const paints = await dsPaints(rule.color);
+        for (const glyph of glyphs) { glyph.strokes = paints; changed += 1; }
+      }
+    }
+  }
+  return { changed };
+}
+
+async function executeDesignSystem(name, input) {
+  if (name === "dsReadGlyphs") return dsReadGlyphs(input);
+  if (name === "dsRecolorGlyphs") return dsRecolorGlyphs(input);
+  if (name === "dsColorVars") return dsColorVars(input);
+  if (name === "dsPing") return { ok: true, version: DS_VERSION, page: { id: figma.currentPage.id, name: figma.currentPage.name }, indexedComponents: dsState.components.size };
+  if (name === "dsRender") return dsRender(input);
+  if (name === "dsIndex") return dsIndex(input);
+  if (name === "dsTextStyles") return dsTextStyles(input);
+  if (name === "dsEffectStyles") return dsEffectStyles(input);
+  if (name === "dsNumberVars") return dsNumberVars(input);
+  if (name === "dsPages") return dsPages(input);
+  if (name === "dsMove") return dsMove(input);
+  if (name === "dsDelete") return dsDelete(input);
+  if (name === "dsInspect") return dsInspect(input);
+  if (name === "dsRenameFile") {
+    try {
+      figma.root.name = input.name;
+      return { ok: true, name: figma.root.name };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error), name: figma.root.name };
+    }
+  }
+  if (name === "dsSetThumbnail") {
+    await figma.setFileThumbnailNodeAsync(await dsNode(input.nodeId));
+    return { ok: true };
+  }
+  if (name === "dsSetCurrentPage") {
+    const page = await dsNode(input.pageId);
+    await figma.setCurrentPageAsync(page);
+    return { ok: true, page: { id: page.id, name: page.name } };
+  }
+  throw new Error(`Unsupported design-system command: ${name}`);
+}
+// ===== End design-system extension =====
