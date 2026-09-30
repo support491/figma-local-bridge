@@ -12,7 +12,7 @@ const mutatingCommands = new Set([
   "archiveNodes", "composeFrame", "copyStyleFromNode", "copyImageFill", "placeLocalImage",
   "createComponentInstance", "applyDesignStyle",
   "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
-  "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont",
+  "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont", "dsFitSection",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1861,7 +1861,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-14";
+const DS_VERSION = "ds-16";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2672,7 +2672,49 @@ async function dsReplaceFont(input) {
   return result;
 }
 
+// Read-only: reports instances whose main component is missing, deleted, or (with libraryPageId)
+// outside the library page. Nested instances follow their parent's main component, so by default
+// only outermost instances are checked.
+async function dsAuditInstances(input) {
+  const roots = input.rootIds && input.rootIds.length ? await Promise.all(input.rootIds.map(dsNode)) : figma.root.children;
+  const pageOf = (node) => { let current = node; while (current && current.type !== "PAGE") current = current.parent; return current; };
+  const insideInstance = (node) => { for (let current = node.parent; current; current = current.parent) if (current.type === "INSTANCE") return true; return false; };
+  const result = { instances: 0, missing: 0, removed: 0, offLibrary: 0, samples: [] };
+  for (const root of roots) {
+    if (root.type === "PAGE") await root.loadAsync();
+    const instances = root.type === "INSTANCE" ? [root] : root.findAllWithCriteria({ types: ["INSTANCE"] });
+    for (const instance of instances) {
+      if (!input.nested && insideInstance(instance)) continue;
+      result.instances += 1;
+      const main = await instance.getMainComponentAsync();
+      const page = main && !main.removed ? pageOf(main) : null;
+      const problem = !main ? "missing" : !page ? "removed" : input.libraryPageId && page.id !== input.libraryPageId ? "offLibrary" : null;
+      if (!problem) continue;
+      result[problem] += 1;
+      if (result.samples.length < 20) result.samples.push({ id: instance.id, name: instance.name, problem, main: main ? main.name : null });
+    }
+  }
+  return result;
+}
+
+// Resizes a section to wrap its children (positions are section-relative) plus padding.
+async function dsFitSection(input) {
+  const section = await dsNode(input.id);
+  if (section.type !== "SECTION") throw new Error(`${input.id} is not a section.`);
+  const pad = input.pad === undefined ? 100 : input.pad;
+  let maxX = 0;
+  let maxY = 0;
+  for (const child of section.children) {
+    maxX = Math.max(maxX, child.x + child.width);
+    maxY = Math.max(maxY, child.y + child.height);
+  }
+  section.resizeWithoutConstraints(Math.max(maxX + pad, input.minWidth || 0), Math.max(maxY + pad, input.minHeight || 0));
+  return { id: section.id, name: section.name, w: Math.round(section.width), h: Math.round(section.height) };
+}
+
 async function executeDesignSystem(name, input) {
+  if (name === "dsFitSection") return dsFitSection(input);
+  if (name === "dsAuditInstances") return dsAuditInstances(input);
   if (name === "dsReplaceFont") return dsReplaceFont(input);
   if (name === "dsDeleteStyles") return dsDeleteStyles(input);
   if (name === "dsReadGlyphs") return dsReadGlyphs(input);
