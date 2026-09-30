@@ -12,6 +12,7 @@ const mutatingCommands = new Set([
   "archiveNodes", "composeFrame", "copyStyleFromNode", "copyImageFill", "placeLocalImage",
   "createComponentInstance", "applyDesignStyle",
   "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
+  "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1860,7 +1861,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-13";
+const DS_VERSION = "ds-14";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2201,7 +2202,7 @@ async function dsBuildText(spec, parent, ctx) {
     await dsFont(style.fontName);
     text.fontName = style.fontName;
   } else {
-    const font = { family: (spec.font && spec.font.family) || "Source Sans 3", style: (spec.font && spec.font.style) || "Regular" };
+    const font = { family: (spec.font && spec.font.family) || "Manrope", style: (spec.font && spec.font.style) || "Regular" };
     await dsFont(font);
     text.fontName = font;
   }
@@ -2634,7 +2635,45 @@ async function dsDeleteStyles(input) {
   return { removed };
 }
 
+// Retypes text ranges set in one font family to another, keeping each range's style (weight).
+// Text bound to a text style follows the style; this reaches ranges with their own font, such as
+// bold spans. With dryRun it only counts, which also verifies that a family is gone.
+async function dsReplaceFont(input) {
+  const { from, to } = input;
+  if (!from || !to) throw new Error("dsReplaceFont needs from and to font families.");
+  const roots = input.rootIds && input.rootIds.length ? await Promise.all(input.rootIds.map(dsNode)) : figma.root.children;
+  const available = new Set((await figma.listAvailableFontsAsync()).filter((font) => font.fontName.family === to).map((font) => font.fontName.style));
+  const result = { from, to, dryRun: !!input.dryRun, textNodes: 0, ranges: 0, styles: {}, missing: [], errors: [], samples: [] };
+  const missing = new Set();
+  for (const root of roots) {
+    if (root.type === "PAGE") await root.loadAsync();
+    const texts = root.type === "TEXT" ? [root] : root.findAllWithCriteria({ types: ["TEXT"] });
+    for (const text of texts) {
+      const segments = text.getStyledTextSegments(["fontName"]).filter((segment) => segment.fontName.family === from);
+      if (!segments.length) continue;
+      result.textNodes += 1;
+      if (result.samples.length < 12) result.samples.push({ id: text.id, name: text.name });
+      for (const segment of segments) {
+        const style = segment.fontName.style;
+        result.styles[style] = (result.styles[style] || 0) + 1;
+        result.ranges += 1;
+        if (!available.has(style)) { missing.add(style); continue; }
+        if (input.dryRun) continue;
+        try {
+          await dsFont({ family: to, style });
+          text.setRangeFontName(segment.start, segment.end, { family: to, style });
+        } catch (error) {
+          if (result.errors.length < 12) result.errors.push({ id: text.id, name: text.name, error: errorMessage(error) });
+        }
+      }
+    }
+  }
+  result.missing = [...missing];
+  return result;
+}
+
 async function executeDesignSystem(name, input) {
+  if (name === "dsReplaceFont") return dsReplaceFont(input);
   if (name === "dsDeleteStyles") return dsDeleteStyles(input);
   if (name === "dsReadGlyphs") return dsReadGlyphs(input);
   if (name === "dsRecolorGlyphs") return dsRecolorGlyphs(input);
