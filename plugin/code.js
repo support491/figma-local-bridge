@@ -1232,7 +1232,8 @@ function componentSummary(component, usageCount = 0) {
     componentSet: component.parent?.type === "COMPONENT_SET"
       ? { id: component.parent.id, key: component.parent.key || null, name: component.parent.name, remote: component.parent.remote === true }
       : null,
-    componentProperties: cloneValue(component.componentPropertyDefinitions ?? {}),
+    // Variants cannot report property definitions; the set owns them.
+    componentProperties: cloneValue((component.parent?.type === "COMPONENT_SET" ? component.parent : component).componentPropertyDefinitions ?? {}),
   };
 }
 
@@ -1862,7 +1863,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-19";
+const DS_VERSION = "ds-20";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
