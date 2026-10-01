@@ -14,6 +14,7 @@ const mutatingCommands = new Set([
   "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
   "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont", "dsFitSection",
   "dsSetProps", "dsSetVisible", "dsRename", "dsAddVariant", "dsMakeSet", "dsSwap", "dsSetFields",
+  "dsClone", "dsSetReactions", "dsFlowStarts", "dsAutoBind", "dsAutoTextStyles", "dsSetText", "dsStyleSegments", "dsReplaceInstance", "dsRescale", "dsSetRich", "dsAddProps", "dsRemoveProps",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1203,7 +1204,7 @@ async function listPageTokens(input) {
       valuesByMode: cloneValue(variable.valuesByMode),
     })),
     paintStyles: paintStyles.slice(0, input.limit).map((style) => ({ id: style.id, name: style.name, paints: style.paints.map(summarizePaint) })),
-    textStyles: textStyles.slice(0, input.limit).map((style) => ({ id: style.id, name: style.name, fontName: style.fontName, fontSize: style.fontSize, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing })),
+    textStyles: textStyles.slice(0, input.limit).map((style) => ({ id: style.id, name: style.name, fontName: style.fontName, fontSize: style.fontSize, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing, textCase: style.textCase })),
     effectStyles: effectStyles.slice(0, input.limit).map((style) => ({ id: style.id, name: style.name, effectCount: style.effects.length })),
   };
   if (input.includePageUsage) {
@@ -1863,8 +1864,41 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-20";
-const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
+const DS_VERSION = "ds-33";
+const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set(),
+  // Library assets by name for files that import the design system (registered with dsLibRegister).
+  lib: { components: new Map(), styles: new Map(), variables: new Map(), imported: new Map() } };
+
+async function dsLibImport(cacheKey, load) {
+  if (!dsState.lib.imported.has(cacheKey)) dsState.lib.imported.set(cacheKey, await load());
+  return dsState.lib.imported.get(cacheKey);
+}
+
+async function dsLibVariable(ref) {
+  const key = dsState.lib.variables.get(ref);
+  return key ? dsLibImport(`var:${key}`, () => figma.variables.importVariableByKeyAsync(key)) : null;
+}
+
+async function dsLibStyle(name) {
+  const key = dsState.lib.styles.get(name);
+  return key ? dsLibImport(`style:${key}`, () => figma.importStyleByKeyAsync(key)) : null;
+}
+
+async function dsTextStyle(name) {
+  return (await dsTextStyleMap()).get(name) || dsLibStyle(name);
+}
+
+async function dsEffectStyle(name) {
+  return (await dsEffectStyleMap()).get(name) || dsLibStyle(name);
+}
+
+function dsLibRegister(input) {
+  for (const item of input.components || []) dsState.lib.components.set(item.name, { key: item.key, type: item.type });
+  for (const item of input.styles || []) dsState.lib.styles.set(item.name, item.key);
+  for (const item of input.variables || []) dsState.lib.variables.set(item.name, item.key);
+  dsState.vars = null;
+  return { components: dsState.lib.components.size, styles: dsState.lib.styles.size, variables: dsState.lib.variables.size };
+}
 
 async function dsNode(id) {
   const node = await figma.getNodeByIdAsync(id);
@@ -1888,6 +1922,7 @@ async function dsVar(ref) {
   let variable = (await dsVars()).get(ref);
   // createColorTokens or the Variables panel can add variables after the cache was built.
   if (!variable) { dsState.vars = null; variable = (await dsVars()).get(ref); }
+  if (!variable) variable = await dsLibVariable(ref);
   if (!variable) throw new Error(`Unknown variable "${ref}".`);
   return variable;
 }
@@ -1970,7 +2005,7 @@ function dsEffect(effect) {
 
 async function dsApplyEffects(node, spec) {
   if (spec.effect) {
-    const style = (await dsEffectStyleMap()).get(spec.effect);
+    const style = await dsEffectStyle(spec.effect);
     if (!style) throw new Error(`Unknown effect style "${spec.effect}".`);
     await node.setEffectStyleIdAsync(style.id);
   } else if (spec.effects) {
@@ -2118,6 +2153,10 @@ async function dsResolveComponent(ref, variant) {
     const id = dsState.components.get(ref);
     if (id) node = await figma.getNodeByIdAsync(id);
   }
+  if (!node && dsState.lib.components.has(ref)) {
+    const lib = dsState.lib.components.get(ref);
+    node = await dsLibImport(`component:${lib.key}`, () => lib.type === "COMPONENT_SET" ? figma.importComponentSetByKeyAsync(lib.key) : figma.importComponentByKeyAsync(lib.key));
+  }
   if (!node) {
     if (dsState.components.get(ref)) dsState.components.delete(ref);
     throw new Error(`Component "${ref}" was not found. It may have been deleted; run dsIndex or create it first.`);
@@ -2199,7 +2238,7 @@ async function dsBuildText(spec, parent, ctx) {
   dsRecord(text, spec, ctx);
   let style = null;
   if (spec.style) {
-    style = (await dsTextStyleMap()).get(spec.style);
+    style = await dsTextStyle(spec.style);
     if (!style) throw new Error(`Unknown text style "${spec.style}".`);
     await dsFont(style.fontName);
     text.fontName = style.fontName;
@@ -2220,7 +2259,7 @@ async function dsBuildText(spec, parent, ctx) {
   if (spec.fill !== undefined) text.fills = await dsPaints(spec.fill);
   for (const span of spec.spans || []) {
     if (span.style) {
-      const spanStyle = (await dsTextStyleMap()).get(span.style);
+      const spanStyle = await dsTextStyle(span.style);
       if (!spanStyle) throw new Error(`Unknown text style "${span.style}".`);
       await dsFont(spanStyle.fontName);
       await text.setRangeTextStyleIdAsync(span.start, span.end, spanStyle.id);
@@ -2562,6 +2601,8 @@ async function dsInspect(input) {
     if ("width" in current) { item.w = Math.round(current.width); item.h = Math.round(current.height); }
     if ("x" in current) { item.x = Math.round(current.x); item.y = Math.round(current.y); }
     if (current.type === "INSTANCE" && current.componentProperties) item.props = Object.fromEntries(Object.entries(current.componentProperties).map(([key, value]) => [key, value.value]));
+    if (current.visible === false) item.hidden = true;
+    if (current.type === "TEXT") item.text = current.characters.slice(0, input.textLength || 80);
     if (depth < (input.depth || 2) && "children" in current) item.children = current.children.map((child) => walk(child, depth + 1));
     return item;
   };
@@ -2748,6 +2789,32 @@ async function dsRename(input) {
 
 // Adds a variant to an existing component set by cloning a sibling variant. Cloning drops
 // componentPropertyReferences, so they are copied back from the source layer by layer.
+// Add component properties to an existing component set (or component) and bind them to
+// layers that already exist in every variant (by layer name), like dsRender does on creation.
+async function dsAddProps(input) {
+  const owner = await dsNode(input.id);
+  if (owner.type !== "COMPONENT_SET" && owner.type !== "COMPONENT") throw new Error(`"${owner.name}" is not a component or component set.`);
+  const variants = owner.type === "COMPONENT_SET" ? owner.children : [owner];
+  const existing = Object.keys(owner.componentPropertyDefinitions || {}).map((key) => key.split("#")[0]);
+  const props = input.props.filter((prop) => !existing.includes(prop.name));
+  const keys = await dsBindProperties(owner, props, variants);
+  return { id: owner.id, added: keys, skipped: input.props.filter((prop) => existing.includes(prop.name)).map((prop) => prop.name) };
+}
+
+// Remove component properties by name; bound layers keep their current values.
+async function dsRemoveProps(input) {
+  const owner = await dsNode(input.id);
+  const defs = owner.componentPropertyDefinitions || {};
+  const removed = [];
+  for (const name of input.names) {
+    const key = Object.keys(defs).find((k) => k === name || k.split("#")[0] === name);
+    if (!key) continue;
+    owner.deleteComponentProperty(key);
+    removed.push(key);
+  }
+  return { id: owner.id, removed };
+}
+
 async function dsAddVariant(input) {
   const source = await dsNode(input.sourceId);
   const set = source.parent;
@@ -2813,17 +2880,532 @@ const DS_SETTABLE_FIELDS = new Set([
 
 // Sets whitelisted layout and geometry fields; {var: "space/8"} binds a number variable,
 // "effectStyle" applies a named effect style and "size" resizes.
+// Copies nodes from any page into a parent (page, section or frame), optionally at a child index.
+async function dsClone(input) {
+  const created = [];
+  for (const item of input.items) {
+    const parent = await dsNode(item.parentId || input.parentId);
+    if (parent.type === "PAGE") await parent.loadAsync();
+    const source = await dsNode(item.id);
+    let page = source.parent;
+    while (page && page.type !== "PAGE") page = page.parent;
+    if (page) await page.loadAsync();
+    const copy = source.clone();
+    if (item.index !== undefined) parent.insertChild(Math.min(item.index, parent.children.length), copy);
+    else parent.appendChild(copy);
+    if (item.name) copy.name = item.name;
+    if (item.x !== undefined) copy.x = item.x;
+    if (item.y !== undefined) copy.y = item.y;
+    created.push({ id: copy.id, name: copy.name, source: source.id, parent: parent.id, x: Math.round(copy.x), y: Math.round(copy.y), w: Math.round(copy.width), h: Math.round(copy.height) });
+  }
+  return { created };
+}
+
+// Finds layers under a root by type, name and/or text, reporting the nearest enclosing instance
+// (for example the Button that holds a matched label) so callers can target it.
+async function dsFind(input) {
+  const root = await dsNode(input.rootId);
+  if (root.type === "PAGE") await root.loadAsync();
+  const flags = input.flags === undefined ? "" : input.flags;
+  const nameRe = input.name ? new RegExp(input.name, flags) : null;
+  const textRe = input.text ? new RegExp(input.text, flags) : null;
+  const types = input.types ? new Set(input.types) : null;
+  const limit = input.limit || 50;
+  const found = [];
+  const visit = (node, instances, hidden) => {
+    if (found.length >= limit) return;
+    const isHidden = hidden || node.visible === false;
+    if (input.visibleOnly && isHidden) return;
+    if (node !== root) {
+      const text = node.type === "TEXT" ? node.characters : null;
+      if ((!types || types.has(node.type)) && (!nameRe || nameRe.test(node.name)) && (!textRe || (text !== null && textRe.test(text)))) {
+        const item = { id: node.id, name: node.name, type: node.type, visible: !isHidden };
+        if (text !== null) item.text = text.slice(0, 120);
+        if ("absoluteBoundingBox" in node && node.absoluteBoundingBox) {
+          const box = node.absoluteBoundingBox;
+          item.box = [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)];
+        }
+        const near = instances[instances.length - 1];
+        if (near) item.instance = { id: near.id, name: near.name };
+        if (instances[0]) item.topInstance = { id: instances[0].id, name: instances[0].name };
+        found.push(item);
+      }
+    }
+    if (!("children" in node)) return;
+    const next = node !== root && node.type === "INSTANCE" ? instances.concat([node]) : instances;
+    for (const child of node.children) visit(child, next, isHidden);
+  };
+  visit(root, [], false);
+  return { found, truncated: found.length >= limit };
+}
+
+// Sets prototype interactions. Each link navigates to a frame (or goes back) on click.
+async function dsSetReactions(input) {
+  const updated = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    const reactions = (item.links || []).map((link) => {
+      const transition = link.transition === "none" ? null : { type: link.transition || "DISSOLVE", easing: { type: "EASE_OUT" }, duration: (link.duration === undefined ? 200 : link.duration) / 1000 };
+      const action = link.back ? { type: "BACK" } : { type: "NODE", destinationId: link.to, navigation: link.navigation || "NAVIGATE", transition, preserveScrollPosition: false };
+      const trigger = link.trigger === "AFTER_TIMEOUT" ? { type: "AFTER_TIMEOUT", timeout: (link.timeout === undefined ? 1200 : link.timeout) / 1000 } : { type: link.trigger || "ON_CLICK" };
+      return { trigger, actions: [action] };
+    });
+    await node.setReactionsAsync(item.append ? node.reactions.concat(reactions) : reactions);
+    updated.push({ id: node.id, name: node.name, reactions: node.reactions.length });
+  }
+  return { updated };
+}
+
+async function dsFlowStarts(input) {
+  const page = await dsNode(input.pageId);
+  if (page.type !== "PAGE") throw new Error(`${input.pageId} is not a page.`);
+  const next = input.starts.map((start) => ({ nodeId: start.nodeId, name: start.name }));
+  // append keeps existing flows, replacing any with the same name.
+  page.flowStartingPoints = input.append ? page.flowStartingPoints.filter((flow) => !next.some((n) => n.name === flow.name)).concat(next) : next;
+  return { flowStartingPoints: page.flowStartingPoints };
+}
+
+function dsHex(color) {
+  const channel = (value) => Math.round(value * 255).toString(16).padStart(2, "0");
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
+}
+
+// Reports what in each frame is not taken from the design system: text without a library
+// text style, solid paints not bound to a variable, effects without a style, and instances of
+// local or missing components. Layers inside instances are reported separately (overrides).
+async function dsAuditDS(input) {
+  const styles = new Map();
+  const styleInfo = async (id) => {
+    if (!styles.has(id)) { const style = await figma.getStyleByIdAsync(id); styles.set(id, style ? { remote: style.remote, name: style.name } : null); }
+    return styles.get(id);
+  };
+  const max = input.samples === undefined ? 6 : input.samples;
+  const results = [];
+  for (const rootId of input.rootIds) {
+    const root = await dsNode(rootId);
+    const r = { id: root.id, name: root.name, counts: { text: 0, unstyledText: 0, localStyleText: 0, rawPaints: 0, instRawPaints: 0, rawEffects: 0, localInstances: 0, missingMain: 0 }, samples: {} };
+    const note = (kind, item) => { r.counts[kind] += 1; const list = r.samples[kind] || (r.samples[kind] = []); if (list.length < max) list.push(item); };
+    const visit = async (node, inInstance) => {
+      if (node.visible === false && !input.includeHidden) return;
+      if (node.type === "INSTANCE") {
+        const main = await node.getMainComponentAsync();
+        if (!main) note("missingMain", { id: node.id, name: node.name });
+        else if (!main.remote) note("localInstances", { id: node.id, name: main.parent && main.parent.type === "COMPONENT_SET" ? main.parent.name : main.name });
+      }
+      if (node.type === "TEXT") {
+        r.counts.text += 1;
+        const id = node.textStyleId;
+        const unstyled = id === figma.mixed ? node.getStyledTextSegments(["textStyleId"]).some((segment) => !segment.textStyleId) : !id;
+        if (unstyled) {
+          const font = node.fontName === figma.mixed ? "mixed" : `${node.fontName.family} ${node.fontName.style}`;
+          note("unstyledText", { id: node.id, inInstance, chars: node.characters.slice(0, 40), font, size: node.fontSize === figma.mixed ? "mixed" : node.fontSize });
+        } else if (id !== figma.mixed) {
+          const info = await styleInfo(id);
+          if (info && !info.remote) note("localStyleText", { id: node.id, style: info.name });
+        }
+      }
+      for (const field of ["fills", "strokes"]) {
+        if (!(field in node)) continue;
+        const paints = node[field];
+        const styleId = field === "fills" ? node.fillStyleId : node.strokeStyleId;
+        if (paints === figma.mixed || (styleId && styleId !== figma.mixed)) continue;
+        paints.forEach((paint, index) => {
+          if (paint.type !== "SOLID" || paint.visible === false || (paint.boundVariables && paint.boundVariables.color)) return;
+          note(inInstance ? "instRawPaints" : "rawPaints", { id: node.id, name: node.name, type: node.type, field, index, hex: dsHex(paint.color), opacity: paint.opacity === undefined ? 1 : Math.round(paint.opacity * 100) / 100 });
+        });
+      }
+      if (!inInstance && "effects" in node && node.effects.length && !node.effectStyleId) note("rawEffects", { id: node.id, name: node.name });
+      if ("children" in node) for (const child of node.children) await visit(child, inInstance || node.type === "INSTANCE");
+    };
+    await visit(root, false);
+    results.push(r);
+  }
+  return { results };
+}
+
+// Binds raw solid paints to the library colour variable with exactly the same colour.
+// input.vars: [{ name, hex, a }]; input.prefer: name prefixes per role, in order.
+async function dsAutoBind(input) {
+  const prefer = Object.assign({ text: ["text/", "status/", "action/", "brand/"], fill: ["surface/", "action/", "status/", "brand/", "border/"], stroke: ["border/", "action/", "status/", "brand/"] }, input.prefer || {});
+  const byColor = new Map();
+  for (const item of input.vars) {
+    const key = `${item.hex.toLowerCase()}@${Math.round((item.a === undefined ? 1 : item.a) * 100)}`;
+    if (!byColor.has(key)) byColor.set(key, []);
+    byColor.get(key).push(item.name);
+  }
+  const choose = (names, role) => {
+    for (const prefix of prefer[role]) { const hit = names.find((name) => name.startsWith(prefix)); if (hit) return hit; }
+    return names[0];
+  };
+  const bound = [];
+  const unmatched = new Map();
+  const visit = async (node, inInstance) => {
+    if (node.visible === false && !input.includeHidden) return;
+    if (!inInstance || input.includeInstances) {
+      for (const field of ["fills", "strokes"]) {
+        if (!(field in node)) continue;
+        const paints = node[field];
+        const styleId = field === "fills" ? node.fillStyleId : node.strokeStyleId;
+        if (paints === figma.mixed || (styleId && styleId !== figma.mixed)) continue;
+        let changed = false;
+        const next = [];
+        for (const paint of paints) {
+          if (paint.type !== "SOLID" || paint.visible === false || (paint.boundVariables && paint.boundVariables.color)) { next.push(paint); continue; }
+          // A bound variable supplies the alpha, so fold paint opacity into the match.
+          const alpha = paint.opacity === undefined ? 1 : paint.opacity;
+          const names = byColor.get(`${dsHex(paint.color)}@${Math.round(alpha * 100)}`);
+          const role = field === "strokes" ? "stroke" : node.type === "TEXT" ? "text" : "fill";
+          if (!names) { const key = `${role} ${dsHex(paint.color)}@${Math.round(alpha * 100)}`; unmatched.set(key, (unmatched.get(key) || 0) + 1); next.push(paint); continue; }
+          const name = choose(names, role);
+          const variable = await dsVar(name);
+          next.push(figma.variables.setBoundVariableForPaint(Object.assign({}, paint, { opacity: 1 }), "color", variable));
+          bound.push({ id: node.id, field, name });
+          changed = true;
+        }
+        if (changed && !input.dryRun) node[field] = next;
+      }
+    }
+    if ("children" in node) for (const child of node.children) await visit(child, inInstance || node.type === "INSTANCE");
+  };
+  for (const rootId of input.rootIds) await visit(await dsNode(rootId), false);
+  const byVariable = {};
+  for (const item of bound) byVariable[item.name] = (byVariable[item.name] || 0) + 1;
+  return { bound: bound.length, byVariable, unmatched: Object.fromEntries(unmatched), dryRun: Boolean(input.dryRun) };
+}
+
+// Applies the library text style whose font, size and line height match an unstyled text layer.
+// input.styles: [{ name, family, style, size, lh, ls }].
+async function dsAutoTextStyles(input) {
+  const applied = {};
+  const unmatched = new Map();
+  let count = 0;
+  const pick = (node) => {
+    if (node.fontName === figma.mixed || node.fontSize === figma.mixed || node.lineHeight === figma.mixed) return null;
+    const lh = node.lineHeight.unit === "PIXELS" ? node.lineHeight.value : null;
+    const ls = node.letterSpacing === figma.mixed ? null : node.letterSpacing.unit === "PIXELS" ? node.letterSpacing.value : node.letterSpacing.value * node.fontSize / 100;
+    const candidates = input.styles.filter((style) => style.family === node.fontName.family && style.style === node.fontName.style && style.size === node.fontSize);
+    const exact = candidates.filter((style) => lh !== null && Math.abs(style.lh - lh) < 0.5 && (ls === null || Math.abs((style.ls || 0) - ls) < 0.2));
+    if (exact.length) return exact[0];
+    if (input.loose && candidates.length) return candidates[0];
+    return null;
+  };
+  const visit = async (node, inInstance) => {
+    if (node.visible === false && !input.includeHidden) return;
+    if (node.type === "TEXT" && (!inInstance || input.includeInstances) && !node.textStyleId) {
+      const match = pick(node);
+      if (!match) {
+        const key = node.fontName === figma.mixed ? "mixed" : `${node.fontName.family} ${node.fontName.style} ${String(node.fontSize)}/${node.lineHeight === figma.mixed ? "mixed" : node.lineHeight.unit === "PIXELS" ? Math.round(node.lineHeight.value) : node.lineHeight.unit}`;
+        unmatched.set(key, (unmatched.get(key) || []).concat(node.id).slice(0, 5));
+      } else {
+        if (!input.dryRun) {
+          const style = await dsTextStyle(match.name);
+          await dsFont(style.fontName);
+          await dsLoadTextNodeFonts(node);
+          await node.setTextStyleIdAsync(style.id);
+        }
+        applied[match.name] = (applied[match.name] || 0) + 1;
+        count += 1;
+      }
+    }
+    if ("children" in node) for (const child of node.children) await visit(child, inInstance || node.type === "INSTANCE");
+  };
+  for (const rootId of input.rootIds) await visit(await dsNode(rootId), false);
+  return { applied: count, byStyle: applied, unmatched: Object.fromEntries(unmatched), dryRun: Boolean(input.dryRun) };
+}
+
+async function dsSetText(input) {
+  const updated = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    if (node.type !== "TEXT") throw new Error(`${item.id} is not a text layer.`);
+    if (item.expect !== undefined && node.characters !== item.expect) throw new Error(`${item.id} changed: expected ${JSON.stringify(item.expect)}, found ${JSON.stringify(node.characters)}.`);
+    await dsLoadTextNodeFonts(node);
+    node.characters = item.text;
+    updated.push({ id: node.id, text: node.characters.slice(0, 60) });
+  }
+  return { updated };
+}
+
+const DS_SEGMENT_FIELDS = ["fontName", "fontSize", "lineHeight", "letterSpacing", "textStyleId", "fills", "textDecoration", "hyperlink"];
+
+function dsSegmentSummary(segment) {
+  const fill = segment.fills && segment.fills[0];
+  return {
+    start: segment.start, end: segment.end, chars: segment.characters.slice(0, 40),
+    font: `${segment.fontName.family} ${segment.fontName.style}`, size: segment.fontSize,
+    lh: segment.lineHeight.unit === "PIXELS" ? segment.lineHeight.value : segment.lineHeight.unit,
+    style: segment.textStyleId || null, decoration: segment.textDecoration,
+    fill: fill ? (fill.boundVariables && fill.boundVariables.color ? `var:${fill.boundVariables.color.id}` : fill.type === "SOLID" ? dsHex(fill.color) : fill.type) : null,
+    link: segment.hyperlink ? segment.hyperlink.value || segment.hyperlink.type : null,
+  };
+}
+
+async function dsTextSegments(input) {
+  const result = [];
+  for (const id of input.ids) {
+    const node = await dsNode(id);
+    if (node.type !== "TEXT") throw new Error(`${id} is not a text layer.`);
+    result.push({ id, characters: node.characters.slice(0, 200), segments: node.getStyledTextSegments(DS_SEGMENT_FIELDS).map(dsSegmentSummary) });
+  }
+  return { result };
+}
+
+// Applies library text styles to each unstyled run of mixed text. A run matches a style with the
+// same family, weight and size (and line height when exact). Underlined runs take the style named
+// in input.underlineStyles[styleName] when given, so links keep their decoration through a style.
+async function dsStyleSegments(input) {
+  const applied = {};
+  const unmatched = [];
+  const pick = (segment) => {
+    const lh = segment.lineHeight.unit === "PIXELS" ? segment.lineHeight.value : null;
+    const candidates = input.styles.filter((style) => style.family === segment.fontName.family && style.style === segment.fontName.style && style.size === segment.fontSize);
+    const exact = candidates.find((style) => lh !== null && Math.abs(style.lh - lh) < 0.5);
+    return exact || (input.loose ? candidates[0] : null);
+  };
+  const handle = async (node) => {
+    const segments = node.getStyledTextSegments(DS_SEGMENT_FIELDS);
+    if (!segments.some((segment) => !segment.textStyleId)) return;
+    await dsLoadTextNodeFonts(node);
+    for (const segment of segments) {
+      if (segment.textStyleId) continue;
+      let match = pick(segment);
+      if (match && segment.textDecoration === "UNDERLINE" && input.underlineStyles) {
+        const linkName = input.underlineStyles[match.name];
+        match = linkName ? input.styles.find((style) => style.name === linkName) || null : null;
+      }
+      if (!match) { unmatched.push({ id: node.id, ...dsSegmentSummary(segment) }); continue; }
+      if (!input.dryRun) {
+        const style = await dsTextStyle(match.name);
+        await dsFont(style.fontName);
+        await node.setRangeTextStyleIdAsync(segment.start, segment.end, style.id);
+        // Text styles do not carry colour, so the run keeps its (variable-bound) fills.
+        if (segment.fills && segment.fills.length) node.setRangeFills(segment.start, segment.end, segment.fills);
+      }
+      applied[match.name] = (applied[match.name] || 0) + 1;
+    }
+  };
+  const visit = async (node, inInstance) => {
+    if (node.visible === false && !input.includeHidden) return;
+    if (node.type === "TEXT" && (!inInstance || input.includeInstances)) await handle(node);
+    if ("children" in node) for (const child of node.children) await visit(child, inInstance || node.type === "INSTANCE");
+  };
+  for (const id of input.ids || []) await handle(await dsNode(id));
+  for (const id of input.rootIds || []) await visit(await dsNode(id), false);
+  return { applied, unmatched: unmatched.slice(0, input.maxUnmatched || 40), unmatchedCount: unmatched.length, dryRun: Boolean(input.dryRun) };
+}
+
+// Replaces instances with a fresh instance of the same component set at the given variant,
+// keeping the other variant values, text/boolean/swap properties, position and layout sizing.
+// Used to undo scale-tool resizing that leaves fractional text sizes inside instances.
+async function dsReplaceInstance(input) {
+  const replaced = [];
+  for (const item of input.items) {
+    const old = await dsNode(item.id);
+    if (old.type !== "INSTANCE") throw new Error(`${item.id} is not an instance.`);
+    const main = await old.getMainComponentAsync();
+    const set = main && main.parent && main.parent.type === "COMPONENT_SET" ? main.parent : null;
+    const base = set ? set.defaultVariant : main;
+    const fresh = base.createInstance();
+    const parent = old.parent;
+    parent.insertChild(parent.children.indexOf(old), fresh);
+    const values = {};
+    for (const [key, prop] of Object.entries(old.componentProperties)) {
+      if (prop.type === "VARIANT") values[key] = prop.value;
+      else if (prop.type === "INSTANCE_SWAP") { if (prop.value) values[key] = prop.value; }
+      else values[key] = prop.value;
+    }
+    Object.assign(values, item.variant || {});
+    fresh.setProperties(values);
+    fresh.name = old.name;
+    if (!dsIsAutoLayout(parent) || old.layoutPositioning === "ABSOLUTE") {
+      fresh.x = old.x + (item.center ? Math.round((old.width - fresh.width) / 2) : 0);
+      fresh.y = old.y + (item.center ? Math.round((old.height - fresh.height) / 2) : 0);
+      if (old.layoutPositioning === "ABSOLUTE") fresh.layoutPositioning = "ABSOLUTE";
+      fresh.constraints = old.constraints;
+    }
+    if ("layoutAlign" in old) fresh.layoutAlign = old.layoutAlign;
+    if (old.visible === false) fresh.visible = false;
+    const before = { w: Math.round(old.width), h: Math.round(old.height) };
+    old.remove();
+    replaced.push({ from: item.id, id: fresh.id, before, after: { w: Math.round(fresh.width), h: Math.round(fresh.height) } });
+  }
+  return { replaced };
+}
+
+async function dsRescale(input) {
+  const result = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    node.rescale(item.scale);
+    result.push({ id: node.id, w: Math.round(node.width), h: Math.round(node.height) });
+  }
+  return { result };
+}
+
+function dsEffectSummary(effect) {
+  const out = { type: effect.type, visible: effect.visible !== false };
+  if (effect.color) { out.hex = dsHex(effect.color); out.opacity = Math.round(effect.color.a * 1000) / 1000; }
+  if (effect.offset) { out.x = effect.offset.x; out.y = effect.offset.y; }
+  if (effect.radius !== undefined) out.blur = effect.radius;
+  if (effect.spread !== undefined) out.spread = effect.spread;
+  return out;
+}
+
+// Effect styles with their effects: local ones, or library ones by name in an importing file.
+async function dsReadEffectStyles(input) {
+  const local = await figma.getLocalEffectStylesAsync();
+  const styles = local.length ? local : (await Promise.all((input.names || []).map((name) => dsEffectStyle(name)))).filter(Boolean);
+  return { styles: styles.map((style) => ({ name: style.name, description: style.description, effects: style.effects.map(dsEffectSummary) })) };
+}
+
+// Describes every component set and standalone component (variables, styles, layout and
+// nested parts per variant) so the app's CSS can be checked against the library.
+// Bounded: an optional page filter plus time and component budgets, yielding between
+// components, so a run in a large screens file stops early instead of freezing Figma.
+async function dsComponentSpec(input) {
+  const pageFilter = Array.isArray(input.pages) && input.pages.length ? new Set(input.pages) : null;
+  const maxMs = Math.min(Math.max(Number(input.maxMs) || 60000, 1000), 170000);
+  const maxComponents = Math.min(Math.max(Number(input.maxComponents) || 400, 1), 2000);
+  const started = Date.now();
+  const names = new Map();
+  const nameOf = async (id, kind) => {
+    if (!id || id === figma.mixed) return id === figma.mixed ? "mixed" : null;
+    if (!names.has(id)) {
+      const item = kind === "var" ? await figma.variables.getVariableByIdAsync(id) : await figma.getStyleByIdAsync(id);
+      names.set(id, item ? item.name : id);
+    }
+    return names.get(id);
+  };
+  const paints = async (list) => {
+    if (!list || list === figma.mixed) return list === figma.mixed ? ["mixed"] : [];
+    const out = [];
+    for (const paint of list) {
+      if (paint.visible === false) continue;
+      if (paint.type === "SOLID") out.push(paint.boundVariables && paint.boundVariables.color ? await nameOf(paint.boundVariables.color.id, "var") : `${dsHex(paint.color)}${paint.opacity !== undefined && paint.opacity < 1 ? `@${Math.round(paint.opacity * 100)}%` : ""}`);
+      else out.push(paint.type);
+    }
+    return out;
+  };
+  const bound = async (node, field) => {
+    const alias = node.boundVariables && node.boundVariables[field];
+    return alias && !Array.isArray(alias) ? nameOf(alias.id, "var") : null;
+  };
+  const describe = async (node) => {
+    const d = { w: Math.round(node.width), h: Math.round(node.height) };
+    if ("layoutMode" in node && node.layoutMode !== "NONE") {
+      d.layout = node.layoutMode === "HORIZONTAL" ? "row" : "column";
+      d.padding = [node.paddingTop, node.paddingRight, node.paddingBottom, node.paddingLeft];
+      d.gap = (await bound(node, "itemSpacing")) || node.itemSpacing;
+      d.align = `${node.primaryAxisAlignItems}/${node.counterAxisAlignItems}`;
+      d.sizing = `${node.primaryAxisSizingMode}/${node.counterAxisSizingMode}`;
+    }
+    if ("cornerRadius" in node) d.radius = (await bound(node, "topLeftRadius")) || (node.cornerRadius === figma.mixed ? [node.topLeftRadius, node.topRightRadius, node.bottomRightRadius, node.bottomLeftRadius] : node.cornerRadius);
+    if ("fills" in node) { const f = await paints(node.fills); if (f.length) d.fill = f; }
+    if ("strokes" in node) { const s = await paints(node.strokes); if (s.length) { d.stroke = s; d.strokeWeight = node.strokeWeight === figma.mixed ? [node.strokeTopWeight, node.strokeRightWeight, node.strokeBottomWeight, node.strokeLeftWeight] : node.strokeWeight; } }
+    if ("effectStyleId" in node && node.effectStyleId) d.effect = await nameOf(node.effectStyleId, "style");
+    else if ("effects" in node && node.effects.length) d.effects = node.effects.filter((e) => e.visible !== false).map(dsEffectSummary);
+    if (node.opacity !== undefined && node.opacity < 1) d.opacity = Math.round(node.opacity * 100) / 100;
+    const parts = [];
+    const walk = async (parent, depth) => {
+      for (const child of parent.children || []) {
+        if (child.visible === false) continue;
+        if (child.type === "TEXT") {
+          parts.push({ layer: child.name, text: child.characters.slice(0, 40), style: await nameOf(child.textStyleId, "style"), color: (await paints(child.fills))[0] || null });
+        } else if (child.type === "INSTANCE") {
+          const main = await child.getMainComponentAsync();
+          parts.push({ layer: child.name, component: main ? (main.parent && main.parent.type === "COMPONENT_SET" ? `${main.parent.name} (${main.name})` : main.name) : null, w: Math.round(child.width), h: Math.round(child.height) });
+        } else if (depth < 3) {
+          const part = { layer: child.name, type: child.type, w: Math.round(child.width), h: Math.round(child.height) };
+          if ("fills" in child) { const f = await paints(child.fills); if (f.length) part.fill = f; }
+          if ("strokes" in child) { const s = await paints(child.strokes); if (s.length) part.stroke = s; }
+          if ("cornerRadius" in child && child.cornerRadius) part.radius = (await bound(child, "topLeftRadius")) || child.cornerRadius;
+          if ("layoutMode" in child && child.layoutMode !== "NONE") { part.padding = [child.paddingTop, child.paddingRight, child.paddingBottom, child.paddingLeft]; part.gap = child.itemSpacing; }
+          if ("effectStyleId" in child && child.effectStyleId) part.effect = await nameOf(child.effectStyleId, "style");
+          else if ("effects" in child && child.effects.length) part.effects = child.effects.filter((e) => e.visible !== false).map(dsEffectSummary);
+          if (part.fill || part.stroke || part.padding || part.effect || part.effects) parts.push(part);
+          if ("children" in child) await walk(child, depth + 1);
+        }
+      }
+    };
+    await walk(node, 0);
+    if (parts.length) d.parts = parts;
+    return d;
+  };
+  const out = [];
+  let truncated = null;
+  pages: for (const page of figma.root.children) {
+    if (pageFilter && !pageFilter.has(page.name) && !pageFilter.has(page.id)) continue;
+    if (Date.now() - started > maxMs) { truncated = `Stopped after ${maxMs} ms, before page "${page.name}".`; break; }
+    await page.loadAsync();
+    for (const node of page.findAllWithCriteria({ types: ["COMPONENT_SET", "COMPONENT"] })) {
+      if (node.type === "COMPONENT" && node.parent && node.parent.type === "COMPONENT_SET") continue;
+      if (input.skip && new RegExp(input.skip).test(node.name)) continue;
+      if (out.length >= maxComponents) { truncated = `Stopped at ${maxComponents} components, on page "${page.name}".`; break pages; }
+      if (Date.now() - started > maxMs) { truncated = `Stopped after ${maxMs} ms, on page "${page.name}".`; break pages; }
+      const entry = { name: node.name, page: page.name, description: node.description || "" };
+      const defs = node.componentPropertyDefinitions || {};
+      entry.properties = Object.fromEntries(Object.entries(defs).map(([key, def]) => [key.split("#")[0], def.type === "VARIANT" ? def.variantOptions : def.type]));
+      const variants = node.type === "COMPONENT_SET" ? node.children : [node];
+      entry.variants = [];
+      for (const variant of variants) entry.variants.push(Object.assign({ name: variant.name }, await describe(variant)));
+      out.push(entry);
+      if (out.length % 10 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  return truncated ? { components: out, truncated } : { components: out };
+}
+
+// Sets text with styled runs: base style/fill for the whole layer, then runs located by
+// `match` (first occurrence) or start/end, each with a text style, fill variable and underline.
+async function dsSetRich(input) {
+  const updated = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    if (node.type !== "TEXT") throw new Error(`${item.id} is not a text layer.`);
+    await dsLoadTextNodeFonts(node);
+    if (item.text !== undefined) node.characters = item.text;
+    const length = node.characters.length;
+    if (item.style) { const style = await dsTextStyle(item.style); await dsFont(style.fontName); await node.setRangeTextStyleIdAsync(0, length, style.id); }
+    if (item.fill) node.setRangeFills(0, length, await dsPaints(item.fill));
+    if (item.style || item.fill) node.setRangeTextDecoration(0, length, "NONE");
+    for (const run of item.runs || []) {
+      const start = run.start !== undefined ? run.start : node.characters.indexOf(run.match);
+      if (start < 0) throw new Error(`"${run.match}" was not found in ${item.id}.`);
+      const end = run.end !== undefined ? run.end : start + run.match.length;
+      if (run.style) { const style = await dsTextStyle(run.style); await dsFont(style.fontName); await node.setRangeTextStyleIdAsync(start, end, style.id); }
+      if (run.fill) node.setRangeFills(start, end, await dsPaints(run.fill));
+      if (run.underline !== undefined) node.setRangeTextDecoration(start, end, run.underline ? "UNDERLINE" : "NONE");
+      // link: a node id (frame) or an https URL.
+      if (run.link) node.setRangeHyperlink(start, end, /^https?:/.test(run.link) ? { type: "URL", value: run.link } : { type: "NODE", value: run.link });
+    }
+    updated.push({ id: node.id, text: node.characters.slice(0, 60) });
+  }
+  return { updated };
+}
+
 async function dsSetFields(input) {
   const result = [];
   for (const item of input.items) {
     const node = await dsNode(item.id);
     for (const [field, value] of Object.entries(item.fields)) {
       if (field === "effectStyle") {
-        const style = (await dsEffectStyleMap()).get(value);
+        const style = await dsEffectStyle(value);
         if (!style) throw new Error(`Unknown effect style "${value}".`);
         await node.setEffectStyleIdAsync(style.id);
       } else if (field === "size") {
         node.resize(value[0], value[1]);
+      } else if (field === "fills" || field === "strokes") {
+        // [] clears; a token name binds that colour variable.
+        // Clear first: assigning a bound paint over another bound paint can render black.
+        const paints = Array.isArray(value) && value.length === 0 ? [] : await dsPaints(value);
+        node[field] = [];
+        node[field] = paints;
+      } else if (field === "effects") {
+        if (!(Array.isArray(value) && value.length === 0)) throw new Error('Only "effects": [] is supported; use effectStyle for styles.');
+        if (node.effectStyleId) await node.setEffectStyleIdAsync("");
+        node.effects = [];
+      } else if (field === "constraints" || field === "maxLines" || field === "textTruncation") {
+        node[field] = value;
       } else if (DS_SETTABLE_FIELDS.has(field)) {
         if (value && typeof value === "object") await dsNumber(node, field, value);
         else node[field] = value;
@@ -2859,6 +3441,24 @@ async function executeDesignSystem(name, input) {
   if (name === "dsMakeSet") return dsMakeSet(input);
   if (name === "dsSwap") return dsSwap(input);
   if (name === "dsSetFields") return dsSetFields(input);
+  if (name === "dsClone") return dsClone(input);
+  if (name === "dsFind") return dsFind(input);
+  if (name === "dsSetReactions") return dsSetReactions(input);
+  if (name === "dsFlowStarts") return dsFlowStarts(input);
+  if (name === "dsLibRegister") return dsLibRegister(input);
+  if (name === "dsAuditDS") return dsAuditDS(input);
+  if (name === "dsAutoBind") return dsAutoBind(input);
+  if (name === "dsAutoTextStyles") return dsAutoTextStyles(input);
+  if (name === "dsSetText") return dsSetText(input);
+  if (name === "dsTextSegments") return dsTextSegments(input);
+  if (name === "dsStyleSegments") return dsStyleSegments(input);
+  if (name === "dsReplaceInstance") return dsReplaceInstance(input);
+  if (name === "dsRescale") return dsRescale(input);
+  if (name === "dsReadEffectStyles") return dsReadEffectStyles(input);
+  if (name === "dsComponentSpec") return dsComponentSpec(input);
+  if (name === "dsSetRich") return dsSetRich(input);
+  if (name === "dsAddProps") return dsAddProps(input);
+  if (name === "dsRemoveProps") return dsRemoveProps(input);
   if (name === "dsRenameFile") {
     try {
       figma.root.name = input.name;
