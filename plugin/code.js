@@ -13,7 +13,7 @@ const mutatingCommands = new Set([
   "createComponentInstance", "applyDesignStyle",
   "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
   "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont", "dsFitSection",
-  "dsSetProps", "dsSetVisible", "dsRename", "dsAddVariant",
+  "dsSetProps", "dsSetVisible", "dsRename", "dsAddVariant", "dsMakeSet", "dsSwap", "dsSetFields",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1862,7 +1862,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-17";
+const DS_VERSION = "ds-18";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2763,6 +2763,69 @@ async function dsAddVariant(input) {
   return { id: clone.id, name: clone.name, setId: set.id, variantProperties: clone.variantProperties };
 }
 
+// Turns a standalone component into a one-variant component set in place. The component keeps
+// its id, so existing instances stay linked; its properties move to the set.
+async function dsMakeSet(input) {
+  const component = await dsNode(input.id);
+  if (component.type !== "COMPONENT" || (component.parent && component.parent.type === "COMPONENT_SET")) throw new Error(`${input.id} is not a standalone component.`);
+  const parent = component.parent;
+  const index = parent.children.indexOf(component);
+  const name = input.name || component.name;
+  const set = figma.combineAsVariants([component], parent, index);
+  set.name = name;
+  component.name = input.variantName;
+  await dsStyleContainer(set, { layout: input.layout || "H", gap: 20, pad: 24, align: "start", cross: "start", wrap: input.wrap, wrapGap: 20, fill: { hex: "#FFFFFF", opacity: 0 }, stroke: "#9747FF", dash: [10, 5], radius: 5 });
+  dsSize(set, { sizeW: input.w ? "fixed" : "hug", sizeH: "hug", w: input.w }, parent);
+  if (input.description) set.description = input.description;
+  dsState.components.set(name, set.id);
+  return { setId: set.id, variantId: component.id, name: set.name };
+}
+
+// Swaps nested or top-level instances to another component (overrides on same-named layers carry over).
+async function dsSwap(input) {
+  const result = [];
+  for (const item of input.items) {
+    const instance = await dsNode(item.id);
+    if (instance.type !== "INSTANCE") throw new Error(`${item.id} is not an instance.`);
+    const component = await dsResolveComponent(item.component, item.variant);
+    instance.swapComponent(component);
+    result.push({ id: instance.id, name: instance.name, main: component.name });
+  }
+  return { swapped: result };
+}
+
+const DS_SETTABLE_FIELDS = new Set([
+  "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "itemSpacing", "counterAxisSpacing",
+  "cornerRadius", "topLeftRadius", "topRightRadius", "bottomLeftRadius", "bottomRightRadius",
+  "layoutMode", "layoutWrap", "primaryAxisAlignItems", "counterAxisAlignItems", "primaryAxisSizingMode", "counterAxisSizingMode",
+  "layoutSizingHorizontal", "layoutSizingVertical", "layoutGrow", "layoutAlign", "layoutPositioning",
+  "strokeWeight", "strokeTopWeight", "strokeRightWeight", "strokeBottomWeight", "strokeLeftWeight", "strokeAlign",
+  "clipsContent", "opacity", "minWidth", "maxWidth", "minHeight", "maxHeight", "itemReverseZIndex", "textAutoResize",
+]);
+
+// Sets whitelisted layout and geometry fields; {var: "space/8"} binds a number variable,
+// "effectStyle" applies a named effect style and "size" resizes.
+async function dsSetFields(input) {
+  const result = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    for (const [field, value] of Object.entries(item.fields)) {
+      if (field === "effectStyle") {
+        const style = (await dsEffectStyleMap()).get(value);
+        if (!style) throw new Error(`Unknown effect style "${value}".`);
+        await node.setEffectStyleIdAsync(style.id);
+      } else if (field === "size") {
+        node.resize(value[0], value[1]);
+      } else if (DS_SETTABLE_FIELDS.has(field)) {
+        if (value && typeof value === "object") await dsNumber(node, field, value);
+        else node[field] = value;
+      } else throw new Error(`Field "${field}" cannot be set.`);
+    }
+    result.push({ id: node.id, name: node.name });
+  }
+  return { updated: result };
+}
+
 async function executeDesignSystem(name, input) {
   if (name === "dsFitSection") return dsFitSection(input);
   if (name === "dsAuditInstances") return dsAuditInstances(input);
@@ -2785,6 +2848,9 @@ async function executeDesignSystem(name, input) {
   if (name === "dsSetVisible") return dsSetVisible(input);
   if (name === "dsRename") return dsRename(input);
   if (name === "dsAddVariant") return dsAddVariant(input);
+  if (name === "dsMakeSet") return dsMakeSet(input);
+  if (name === "dsSwap") return dsSwap(input);
+  if (name === "dsSetFields") return dsSetFields(input);
   if (name === "dsRenameFile") {
     try {
       figma.root.name = input.name;
