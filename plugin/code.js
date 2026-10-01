@@ -13,6 +13,7 @@ const mutatingCommands = new Set([
   "createComponentInstance", "applyDesignStyle",
   "dsRender", "dsTextStyles", "dsEffectStyles", "dsNumberVars", "dsPages", "dsMove", "dsDelete", "dsRenameFile", "dsSetThumbnail",
   "dsColorVars", "dsDeleteStyles", "dsRecolorGlyphs", "dsReplaceFont", "dsFitSection",
+  "dsSetProps", "dsSetVisible", "dsRename", "dsAddVariant",
 ]);
 
 function bridgeStatus(message, kind = "") {
@@ -1861,7 +1862,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-16";
+const DS_VERSION = "ds-17";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2712,6 +2713,56 @@ async function dsFitSection(input) {
   return { id: section.id, name: section.name, w: Math.round(section.width), h: Math.round(section.height) };
 }
 
+// Sets component properties (including variants) on existing instances in place.
+async function dsSetProps(input) {
+  const result = [];
+  for (const item of input.items) {
+    const instance = await dsNode(item.id);
+    if (instance.type !== "INSTANCE") throw new Error(`${item.id} is not an instance.`);
+    await dsSetInstanceProperties(instance, item.props, instance.name);
+    result.push({ id: instance.id, name: instance.name, props: Object.fromEntries(Object.entries(instance.componentProperties).map(([key, value]) => [key, value.value])) });
+  }
+  return { updated: result };
+}
+
+async function dsSetVisible(input) {
+  const result = [];
+  for (const id of input.ids) {
+    const node = await dsNode(id);
+    node.visible = input.visible;
+    result.push({ id: node.id, name: node.name, visible: node.visible });
+  }
+  return { updated: result };
+}
+
+async function dsRename(input) {
+  const result = [];
+  for (const item of input.items) {
+    const node = await dsNode(item.id);
+    node.name = item.name;
+    result.push({ id: node.id, name: node.name });
+  }
+  return { updated: result };
+}
+
+// Adds a variant to an existing component set by cloning a sibling variant. Cloning drops
+// componentPropertyReferences, so they are copied back from the source layer by layer.
+async function dsAddVariant(input) {
+  const source = await dsNode(input.sourceId);
+  const set = source.parent;
+  if (source.type !== "COMPONENT" || !set || set.type !== "COMPONENT_SET") throw new Error(`${input.sourceId} is not a variant inside a component set.`);
+  const clone = source.clone();
+  const index = input.index === undefined ? set.children.indexOf(source) + 1 : input.index;
+  set.insertChild(Math.min(index, set.children.length), clone);
+  clone.name = input.name;
+  const copyRefs = (from, to) => {
+    if (from.componentPropertyReferences && Object.keys(from.componentPropertyReferences).length) to.componentPropertyReferences = Object.assign({}, from.componentPropertyReferences);
+    if ("children" in from && "children" in to) from.children.forEach((child, i) => { if (to.children[i]) copyRefs(child, to.children[i]); });
+  };
+  (source.children || []).forEach((child, i) => copyRefs(child, clone.children[i]));
+  return { id: clone.id, name: clone.name, setId: set.id, variantProperties: clone.variantProperties };
+}
+
 async function executeDesignSystem(name, input) {
   if (name === "dsFitSection") return dsFitSection(input);
   if (name === "dsAuditInstances") return dsAuditInstances(input);
@@ -2730,6 +2781,10 @@ async function executeDesignSystem(name, input) {
   if (name === "dsMove") return dsMove(input);
   if (name === "dsDelete") return dsDelete(input);
   if (name === "dsInspect") return dsInspect(input);
+  if (name === "dsSetProps") return dsSetProps(input);
+  if (name === "dsSetVisible") return dsSetVisible(input);
+  if (name === "dsRename") return dsRename(input);
+  if (name === "dsAddVariant") return dsAddVariant(input);
   if (name === "dsRenameFile") {
     try {
       figma.root.name = input.name;
