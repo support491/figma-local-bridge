@@ -1862,7 +1862,7 @@ figma.ui.onmessage = async (message) => {
 // Declarative ds* commands only: every command takes JSON specs; nothing is evaluated as code.
 // They create/index components, component sets, text/effect styles, number variables,
 // pages and auto-layout node trees, so a design system can be built over the local bridge.
-const DS_VERSION = "ds-18";
+const DS_VERSION = "ds-19";
 const dsState = { vars: null, textStyles: null, effectStyles: null, components: new Map(), fonts: new Set() };
 
 async function dsNode(id) {
@@ -2755,11 +2755,18 @@ async function dsAddVariant(input) {
   const index = input.index === undefined ? set.children.indexOf(source) + 1 : input.index;
   set.insertChild(Math.min(index, set.children.length), clone);
   clone.name = input.name;
+  // Layers inside a nested instance belong to that instance's own component, so stop there.
   const copyRefs = (from, to) => {
     if (from.componentPropertyReferences && Object.keys(from.componentPropertyReferences).length) to.componentPropertyReferences = Object.assign({}, from.componentPropertyReferences);
+    if (from.type === "INSTANCE") return;
     if ("children" in from && "children" in to) from.children.forEach((child, i) => { if (to.children[i]) copyRefs(child, to.children[i]); });
   };
-  (source.children || []).forEach((child, i) => copyRefs(child, clone.children[i]));
+  try {
+    (source.children || []).forEach((child, i) => copyRefs(child, clone.children[i]));
+  } catch (error) {
+    clone.remove();
+    throw error;
+  }
   return { id: clone.id, name: clone.name, setId: set.id, variantProperties: clone.variantProperties };
 }
 
