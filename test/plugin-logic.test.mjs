@@ -24,7 +24,7 @@ async function loadPluginHelpers() {
     setInterval,
     setTimeout,
   });
-  vm.runInContext(`${source}\nglobalThis.__pluginTests = { pollQuery, activityForCommand, replaceTextPreservingStyles, visibilityInfo, auditTextOverflow, auditSummary, archiveNodes, createStyledText, composeFrame, canvasLayout, setTextFrame, setTextCase, splitTextBlock, createComponentInstance, applyDesignStyle, copyStyleFromNode, listDesignSystemAssets, execute, figma };`, context);
+  vm.runInContext(`${source}\nglobalThis.__pluginTests = { pollQuery, isRuntimeCallbackError, reconnectDelay, activityForCommand, replaceTextPreservingStyles, visibilityInfo, auditTextOverflow, auditSummary, archiveNodes, createStyledText, composeFrame, canvasLayout, setTextFrame, setTextCase, splitTextBlock, createComponentInstance, applyDesignStyle, copyStyleFromNode, listDesignSystemAssets, execute, figma };`, context);
   return context.__pluginTests;
 }
 
@@ -36,6 +36,18 @@ test("poll query is encoded without browser-only URLSearchParams", async () => {
     helpers.pollQuery("figma session+1"),
     "?sessionId=figma%20session%2B1&pageId=0%3A1&pageName=Brochure%20frames%20%26%20copy%20%2F%20M%C4%81ori&selectionCount=1",
   );
+});
+
+test("a lost Figma runtime callback stops reconnecting instead of looping", async () => {
+  const { isRuntimeCallbackError } = await loadPluginHelpers();
+  assert.equal(isRuntimeCallbackError(new Error("in <unknown>: Attempted to invoke callback with invalid id -1345")), true);
+  assert.equal(isRuntimeCallbackError(new Error("Failed to fetch")), false);
+  assert.equal(isRuntimeCallbackError({ status: 409, message: "This plugin session was replaced by a newer Figma connection." }), false);
+});
+
+test("reconnect waits grow from 2 to at most 30 seconds", async () => {
+  const { reconnectDelay } = await loadPluginHelpers();
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 20].map(reconnectDelay), [2000, 4000, 8000, 16000, 30000, 30000, 30000]);
 });
 
 test("plugin activity distinguishes document writes from reads", async () => {

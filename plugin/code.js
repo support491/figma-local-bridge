@@ -94,6 +94,17 @@ function isReplacementError(error) {
   return error?.status === 409 && /replaced|newer figma plugin/i.test(errorMessage(error));
 }
 
+// Figma's plugin runtime can lose track of async callbacks (for example after a long session);
+// every later fetch then fails the same way, so reconnecting only repeats the error.
+function isRuntimeCallbackError(error) {
+  return /invoke callback with invalid id/i.test(errorMessage(error));
+}
+
+// Waits 2 s after the first failure, doubling to at most 30 s while the bridge stays unreachable.
+function reconnectDelay(failures) {
+  return Math.min(2_000 * 2 ** Math.max(0, failures - 1), 30_000);
+}
+
 async function postHeartbeat(sessionId) {
   return bridgeRequest("/v1/heartbeat", {
     method: "POST",
@@ -118,6 +129,7 @@ async function executeWithHeartbeat(sessionId, command) {
 
 async function startBridge() {
   const generation = ++bridgeGeneration;
+  let failures = 0;
   while (generation === bridgeGeneration) {
     try {
       const sessionId = `figma-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -127,6 +139,7 @@ async function startBridge() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sessionId, clientId: bridgeClientId, info: bridgeContext() }),
       });
+      failures = 0;
       figma.ui.postMessage({ type: "bridge-session", sessionId, clientId: bridgeClientId, bridgeUrl });
       bridgeStatus(`Connected to local MCP bridge on “${figma.currentPage.name}”. Keep this plugin open.`, "connected");
       while (generation === bridgeGeneration) {
@@ -160,8 +173,13 @@ async function startBridge() {
         bridgeStatus("Disconnected because another Figma file took over this bridge. Reload this plugin to reconnect here.", "waiting");
         return;
       }
+      if (isRuntimeCallbackError(error)) {
+        bridgeStatus("Figma stopped answering this plugin. Close it and run Local MCP Bridge again; if this comes back, use Help → Troubleshooting → Reload All Tabs first.", "waiting");
+        return;
+      }
+      failures += 1;
       bridgeStatus(`Waiting for Codex bridge… (${errorMessage(error)})`, "waiting");
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await new Promise((resolve) => setTimeout(resolve, reconnectDelay(failures)));
     }
   }
 }
