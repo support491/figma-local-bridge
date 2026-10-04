@@ -2758,6 +2758,30 @@ async function dsAuditInstances(input) {
   return result;
 }
 
+// Which components a subtree uses: instances grouped by component set (or component) name, with
+// sample IDs. Instances inside other instances are skipped unless nested is set. Read-only.
+async function dsUsage(input) {
+  const roots = await Promise.all((input.rootIds || []).map(dsNode));
+  const usage = {};
+  for (const root of roots) {
+    if (root.type === "PAGE") await root.loadAsync();
+    const instances = root.type === "INSTANCE" ? [root] : root.findAllWithCriteria({ types: ["INSTANCE"] });
+    for (const instance of instances) {
+      if (!input.nested) {
+        let nested = false;
+        for (let current = instance.parent; current && current !== root; current = current.parent) if (current.type === "INSTANCE") { nested = true; break; }
+        if (nested) continue;
+      }
+      const main = await instance.getMainComponentAsync();
+      const name = !main ? "(missing)" : main.parent && main.parent.type === "COMPONENT_SET" ? main.parent.name : main.name;
+      const entry = usage[name] || (usage[name] = { count: 0, ids: [] });
+      entry.count += 1;
+      if (entry.ids.length < (input.sample || 5)) entry.ids.push(instance.id);
+    }
+  }
+  return usage;
+}
+
 // Resizes a section to wrap its children (positions are section-relative) plus padding.
 async function dsFitSection(input) {
   const section = await dsNode(input.id);
@@ -3461,6 +3485,7 @@ async function executeDesignSystem(name, input) {
   if (name === "dsSetFields") return dsSetFields(input);
   if (name === "dsClone") return dsClone(input);
   if (name === "dsFind") return dsFind(input);
+  if (name === "dsUsage") return dsUsage(input);
   if (name === "dsSetReactions") return dsSetReactions(input);
   if (name === "dsFlowStarts") return dsFlowStarts(input);
   if (name === "dsLibRegister") return dsLibRegister(input);
