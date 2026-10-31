@@ -2,7 +2,13 @@
   "mcpServers": {
     "figma_local": {
       "command": "node",
-      "args": ["./dist/server.mjs"]
+      "args": [
+        "./dist/server.mjs",
+        "--proxy-only"
+      ],
+      "env": {
+        "FIGMA_BRIDGE_API_DISABLED": "1"
+      }
     }
   }
 }

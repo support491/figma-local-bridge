@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.14.2-local.2 — 2026-10-29
+
+- Canvas calls can target saved file names (`name:Hims Design`) or stable supplied file references as well as runtime IDs. Exact unique matches are required; per-call switching preserves each assistant’s default and session lease.
+- Text-overflow audits use bounded, yielding batches with resumable cursors, progress and explicit incomplete results. Packaged audits preserve incomplete verification and prevent premature archiving.
+- A compact status panel keeps file identity, connection status and activity visible while the bridge runs. Expand restores connection controls; panel size is remembered locally without changing saved file details.
+
+## 0.14.2-local.1 — 2026-10-29
+
+- Connection names and supplied file URLs now persist in private document plugin metadata, load before connecting, and remain separate between files. Saving reports storage failures separately from temporary bridge publication failures; clearing both fields removes the saved record.
+- Preserved the local design-system, font, page-creation, layout, variable and prototype extensions while merging upstream 0.14.2.
+- Added a persistent macOS HTTP owner and proxy-only MCP clients so assistant restarts do not own the plugin listener lifecycle.
+- Added independent plugin targets, explicit per-call routing, pinned composite calls and per-target queues/leases. Connections no longer displace unrelated files.
+- Added connection listing, per-proxy file defaults, runtime labels/file links, and a connected-files picker with explicit target IDs and file opening.
+- Moved plugin transport to bounded browser-iframe requests, with single-flight heartbeats, generation guards, phase-aware recovery and command-result deduplication.
+- Made expensive text-read layout and paint diagnostics opt-in.
+- Added an explicit local switch that disables optional API/comment tools and credential/REST routes; the installed service enables this switch.
+- Added isolated multi-target, client-restart, routing, operation-recovery and service-configuration checks. Figma runtime failures can still require a plugin restart; file opening does not auto-launch a plugin.
+
+## 0.14.2 — 2026-10-29
+
+- Required image areas now check paint visibility and opacity, plus element and ancestor visibility. Invisible images no longer pass verification or allow previous content to be archived. Reload the updated plugin: compositions require the new image-audit capability.
+- Composition recovery IDs are assigned before dispatch and retained in errors, including when the owner accepts a request but its reply is lost. Retrying the same ID retrieves the original operation rather than creating another.
+- A plugin whose initial heartbeat confirms session replacement stops before executing the command. Long compositions also check that replacement signal at progress boundaries.
+- Composition and image-copy tools switch inherited CROP fills to centered FILL when source and target proportions differ, and report the adjustment. Explicit crop modes/transforms and proportional copies are preserved.
+- Updated the shared workflow with clearer delegation timing, source-neutral copy reconciliation, native renaming, and crop/recovery guidance. Routine copy checks no longer request PNGs by default in MCP instructions. Personal source-system policies remain outside the published skill.
+- Added regression coverage for invisible images, lost replies, displaced sessions and inherited/explicit crops.
+
+## 0.14.1 — 2026-10-01
+
+- Resizing a CROP-filled node to a different aspect ratio switches that image fill to centered FILL before resizing, preventing image distortion; the resize result reports the adjustment.
+- Crop correction supports mixed image/pattern fill stacks and detects proportional changes in very narrow or tall images. Failed resizes restore the original fills; custom crop positions are reset on successful aspect changes.
+- Added regression coverage for crop correction, proportional resizing, mixed fills, and failure recovery.
+
+## 0.14.0 — 2026-10-01
+
+- Added tracked compositions with retained operation IDs, phase/percentage updates, idempotent resume, and `figma_operation_status`. A caller timeout no longer discards a later composition result.
+- Added `figma_start_composition` for non-blocking board creation. The plugin status panel now shows composition progress while Figma works.
+- Composed frames and rectangles can copy an existing image fill directly with `imageSourceNodeId`, including scale mode and crop transform controls.
+- Added `imageRequired` and a structured image audit. Empty required image areas leave `verificationComplete` false and preserve any previous layout instead of archiving it.
+- Composition checks plugin and bridge-owner capabilities before dispatch, preventing older processes from bypassing image verification or operation tracking. Missing or inconsistent completion evidence requires document inspection.
+- A lost final progress update preserves the committed replacement and archive. Session replacement cancels queued work and marks dispatched work as unknown until the document is inspected.
+
+## 0.13.4 — 2026-09-30
+
+- `figma_place_local_image` now accepts an approved HTTPS image URL as well as an absolute local image path. Provide exactly one source; PNG, JPEG, GIF, and WebP remain supported.
+- URL downloads are capped at 25 MB, reject embedded credentials and non-public destinations, and recheck each destination across up to five redirects. The bridge checks image signatures before sending bytes to Figma and omits URL query strings from returned source metadata.
+- Added offline checks for source validation, DNS and redirect restrictions, image signatures, transfer limits, and Node's DNS lookup callback modes.
+- Updated the tool reference and workflow guidance for approved URL images. Reload the MCP server and Figma development plugin after updating.
+
 ## 0.13.3 — 2026-09-23
 
 - Replaced the temporary mark with the supplied icon in the Codex plugin listing, composer, README, and Figma plugin status panel. All placements use the same unmodified PNG.

@@ -3,30 +3,109 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-async function loadPluginHelpers() {
+async function loadPluginHelpers({ fetchImpl = fetch, postMessageImpl = () => {}, setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout, documentData = new Map(), DateImpl = Date } = {}) {
   const pluginPath = new URL("../plugin/code.js", import.meta.url);
   const source = await readFile(pluginPath, "utf8");
   const figma = {
     editorType: "figma",
     currentPage: { id: "0:1", name: "Test", selection: [] },
+    root: {
+      getPluginData(key) { return documentData.get(key) ?? ""; },
+      setPluginData(key, value) { if (value) documentData.set(key, value); else documentData.delete(key); },
+    },
     mixed: Symbol("mixed"),
     showUI() {},
-    ui: { postMessage() {}, onmessage: null },
+    ui: { postMessage: postMessageImpl, onmessage: null },
     viewport: { scrollAndZoomIntoView() {} },
     async loadFontAsync() {},
+    async getNodeByIdAsync(id) { return this.currentPage.id === id ? this.currentPage : this.currentPage.findOne?.((node) => node.id === id) || null; },
   };
   const context = vm.createContext({
     __html__: "",
     btoa,
     clearInterval,
-    fetch,
+    clearTimeout: clearTimeoutImpl,
+    AbortController,
+    fetch: fetchImpl,
     figma,
+    Date: DateImpl,
     setInterval,
-    setTimeout,
+    setTimeout: setTimeoutImpl,
   });
-  vm.runInContext(`${source}\nglobalThis.__pluginTests = { pollQuery, isRuntimeCallbackError, reconnectDelay, activityForCommand, replaceTextPreservingStyles, visibilityInfo, auditTextOverflow, auditSummary, archiveNodes, createStyledText, composeFrame, canvasLayout, setTextFrame, setTextCase, splitTextBlock, createComponentInstance, applyDesignStyle, copyStyleFromNode, listDesignSystemAssets, execute, figma };`, context);
+  vm.runInContext(`${source}\nglobalThis.__pluginTests = { pollQuery, isRuntimeCallbackError, reconnectDelay, activityForCommand, replaceTextPreservingStyles, visibilityInfo, auditTextOverflow, auditSummary, archiveNodes, createStyledText, composeFrame, canvasLayout, setTextFrame, setTextCase, splitTextBlock, createComponentInstance, applyDesignStyle, copyStyleFromNode, listDesignSystemAssets, executeWithHeartbeat, postHeartbeat, bridgeRequest, finishTransportRequest, bridgeContext, setBridgeMetadata, loadBridgeMetadata, saveBridgeMetadata, metadataPersistenceInfo, connectionMetadataKey, validFigmaFileUrl, startBridge, stopBridge, textContent, useUiTransport() { bridgeTransport = "ui-http-v1"; }, setSession(value) { bridgeSessionId = value; }, state() { return { phase: bridgePhase, pendingRequests: transportRequests.size, generation: bridgeGeneration }; }, execute, figma };`, context);
   return context.__pluginTests;
 }
+
+function cropResizeFixture(figma, { width = 200, height = 100, pattern = false, failResize = false, failRestore = false } = {}) {
+  let fills = [{ type: "IMAGE", imageHash: "approved-image", scaleMode: "CROP", opacity: 0.8, imageTransform: [[1, 0, 0.2], [0, 1, 0.1]] }];
+  if (pattern) fills.push({ type: "PATTERN", sourceNodeId: "source" });
+  const originalFills = JSON.parse(JSON.stringify(fills));
+  const writes = [];
+  const node = {
+    id: "photo", name: "Photo", type: "RECTANGLE", x: 0, y: 0, width, height, visible: true,
+    get fills() { return fills; },
+    set fills(_) { throw new Error("Use the async setter for this fill stack"); },
+    async setFillsAsync(value) {
+      await Promise.resolve();
+      if (failRestore && writes.length > 0) throw new Error("Restore rejected");
+      fills = JSON.parse(JSON.stringify(value));
+      writes.push(fills);
+    },
+    resize(nextWidth, nextHeight) {
+      if (failResize) throw new Error("Resize rejected");
+      this.width = nextWidth; this.height = nextHeight;
+    },
+  };
+  configurePage(figma, [node]);
+  return { node, writes, originalFills };
+}
+
+for (const dimensions of [
+  { name: "ordinary image", width: 200, height: 100, nextWidth: 100, nextHeight: 100 },
+  { name: "very narrow image", width: 1, height: 100000, nextWidth: 1, nextHeight: 95000 },
+  { name: "very tall-aspect change", width: 100000, height: 1, nextWidth: 95000, nextHeight: 1 },
+]) {
+  test(`aspect-changing resize corrects crop for ${dimensions.name} and preserves pattern fills`, async () => {
+    const { execute, figma } = await loadPluginHelpers();
+    const { node, writes, originalFills } = cropResizeFixture(figma, { ...dimensions, pattern: true });
+    const result = await execute("moveResizeReparent", { nodeId: node.id, width: dimensions.nextWidth, height: dimensions.nextHeight });
+    assert.equal(node.width, dimensions.nextWidth);
+    assert.equal(node.height, dimensions.nextHeight);
+    assert.equal(node.fills[0].scaleMode, "FILL");
+    assert.equal(node.fills[0].imageTransform, undefined);
+    assert.equal(node.fills[0].imageHash, "approved-image");
+    assert.equal(node.fills[0].opacity, 0.8);
+    assert.deepEqual(node.fills[1], originalFills[1]);
+    assert.equal(writes.length, 1);
+    assert.equal(result.imageResizeAdjustments[0].reason, "aspect-ratio-changed");
+  });
+}
+
+for (const input of [{ width: 400, height: 200 }, { x: 50, y: 60 }]) {
+  test(`proportional resize or movement keeps custom crop: ${JSON.stringify(input)}`, async () => {
+    const { execute, figma } = await loadPluginHelpers();
+    const { node, writes, originalFills } = cropResizeFixture(figma);
+    const result = await execute("moveResizeReparent", { nodeId: node.id, ...input });
+    assert.deepEqual(node.fills, originalFills);
+    assert.equal(writes.length, 0);
+    assert.equal(result.imageResizeAdjustments.length, 0);
+  });
+}
+
+test("resize failure restores custom crop and mixed pattern fills asynchronously", async () => {
+  const { execute, figma } = await loadPluginHelpers();
+  const { node, writes, originalFills } = cropResizeFixture(figma, { pattern: true, failResize: true });
+  await assert.rejects(execute("moveResizeReparent", { nodeId: node.id, width: 100 }), /Resize rejected/);
+  assert.deepEqual(node.fills, originalFills);
+  assert.equal(writes.length, 2);
+  assert.equal(node.width, 200);
+});
+
+test("failed crop restoration explicitly requires inspecting the node", async () => {
+  const { execute, figma } = await loadPluginHelpers();
+  const { node } = cropResizeFixture(figma, { failResize: true, failRestore: true });
+  await assert.rejects(execute("moveResizeReparent", { nodeId: node.id, width: 100 }), /original crop fill.*could not be restored.*Inspect/);
+});
 
 test("poll query is encoded without browser-only URLSearchParams", async () => {
   const helpers = await loadPluginHelpers();
@@ -60,6 +139,27 @@ test("plugin activity distinguishes document writes from reads", async () => {
   assert.equal(read.label, "Read frame content");
   assert.equal(activityForCommand("prepareReviewData").mutating, false);
 });
+
+for (const replaced of [false, true]) {
+  test(`initial heartbeat ${replaced ? "replacement prevents" : "success permits"} a document mutation`, async () => {
+    let heartbeats = 0;
+    const { executeWithHeartbeat, figma } = await loadPluginHelpers({ fetchImpl: async () => {
+      heartbeats++;
+      return { status: replaced ? 409 : 204, ok: !replaced, json: async () => ({ error: "This plugin session was replaced by a newer Figma connection." }) };
+    } });
+    const node = styledText("target", "Keep this copy");
+    configurePage(figma, [node]);
+    const result = executeWithHeartbeat("session", { name: "moveResizeReparent", input: { nodeId: node.id, x: 500 } });
+    if (replaced) {
+      await assert.rejects(result, /replaced/);
+      assert.equal(node.x, 10);
+    } else {
+      await result;
+      assert.equal(node.x, 500);
+    }
+    assert.equal(heartbeats, 1);
+  });
+}
 
 test("packaged review read preserves frame order and audit shape", async () => {
   const { execute, figma } = await loadPluginHelpers();
@@ -210,6 +310,161 @@ test("full replacement seeds new copy from the existing first-character style", 
   assert.equal(result.styleStrategy, "first-existing-character");
   assert.deepEqual(node.calls.map((call) => call.action), ["insert", "delete"]);
   assert.equal(node.calls[0].style, "AFTER");
+});
+
+function overflowAuditFixture(figma, textCount = 0, id = "audit:root") {
+  const root = { id, name: "Audit frame", type: "FRAME", visible: true, opacity: 1, children: [], absoluteBoundingBox: { x: 0, y: 0, width: 1000, height: 1000 },
+    findAll() { throw new Error("An audit must not scan the full subtree up front."); },
+    findAllWithCriteria() { throw new Error("An audit must not scan the full subtree up front."); } };
+  root.children = Array.from({ length: textCount }, (_, index) => styledText(`${id}:text:${index}`, `Copy ${index}`, root));
+  const page = configurePage(figma, [root]);
+  return { root, page, texts: root.children };
+}
+
+test("overflow audits resume bounded text batches without remeasuring or losing cumulative warnings", async () => {
+  const { auditTextOverflow, auditSummary, figma } = await loadPluginHelpers();
+  const { root, texts, page } = overflowAuditFixture(figma, 5);
+  texts[0].maxLines = 1;
+  let result = await auditTextOverflow(root, { maxTextNodes: 2 });
+  assert.equal(result.complete, false);
+  assert.equal(result.incompleteReason, "text_limit");
+  assert.equal(result.text.length, 2);
+  assert.equal(result.warningCount, 1);
+  const batches = [result];
+  while (!result.complete) {
+    result = await auditTextOverflow(root, { maxTextNodes: 2, cursor: result.nextCursor });
+    batches.push(result);
+  }
+  assert.equal(batches.length, 3);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.text.length, 1);
+  assert.equal(result.textCount, 5);
+  assert.equal(result.warningCount, 1, "an empty-warning final batch must not erase an earlier warning");
+  assert.equal(result.batch.warningCount, 0);
+  assert.deepEqual(batches.flatMap(batch => Array.from(batch.text, node => node.id)), texts.map(node => node.id));
+  assert.deepEqual(page.children, [root], "temporary probes must not remain in the document");
+  const summary = auditSummary(batches[0]);
+  assert.equal(summary.complete, false);
+  assert.equal(summary.nextCursor, batches[0].nextCursor);
+  assert.equal(summary.batchOnly, true);
+  assert.equal(summary.totals.textCount, 2);
+});
+
+test("non-text traversal is budgeted and can resume without a hidden full scan", async () => {
+  const { auditTextOverflow, figma } = await loadPluginHelpers();
+  const { root } = overflowAuditFixture(figma);
+  root.children = Array.from({ length: 14 }, (_, index) => ({ id: `shape:${index}`, type: "RECTANGLE", name: "Shape", parent: root }));
+  let childrenReads = 0;
+  const children = root.children;
+  Object.defineProperty(root, "children", { get() { childrenReads++; return [...children]; } });
+  let result = await auditTextOverflow(root, { maxTraversalNodes: 4 });
+  assert.equal(result.complete, false);
+  assert.equal(result.incompleteReason, "traversal_limit");
+  assert.ok(childrenReads <= 3, "a wide parent's native child array should be read a bounded number of times per batch, not once per sibling");
+  let batches = 1;
+  while (!result.complete) {
+    assert.equal(result.batch.visitedNodeCount, 4);
+    result = await auditTextOverflow(root, { maxTraversalNodes: 4, cursor: result.nextCursor });
+    batches++;
+  }
+  assert.equal(batches, 4);
+  assert.equal(result.totals.visitedNodeCount, 15);
+  assert.equal(result.textCount, 0);
+  assert.ok(childrenReads <= 12, "resumption validates pending ancestry without repeatedly allocating child arrays");
+});
+
+test("audit batches yield between measurements, report progress, and remove failed probes", async () => {
+  let yields = 0;
+  const { auditTextOverflow, figma } = await loadPluginHelpers({ setTimeoutImpl(callback) { yields++; queueMicrotask(callback); return yields; } });
+  const { root, texts, page } = overflowAuditFixture(figma, 11);
+  let removedProbe = false;
+  const clone = texts[0].clone;
+  texts[0].clone = function() {
+    const probe = clone.call(this);
+    probe.resize = () => { throw new Error("Measurement rejected"); };
+    const remove = probe.remove;
+    probe.remove = function() { removedProbe = true; remove.call(this); };
+    return probe;
+  };
+  const progress = [];
+  const result = await auditTextOverflow(root, {}, update => { progress.push(update); });
+  assert.equal(result.complete, true);
+  assert.ok(yields >= 2);
+  assert.ok(progress.some(update => update.current === 5 && /in this batch/.test(update.message)));
+  assert.equal(progress.at(-1).percent, 100);
+  assert.equal(removedProbe, true);
+  assert.equal(result.text[0].warnings[0].code, "MEASUREMENT_FAILED");
+  assert.deepEqual(page.children, [root]);
+});
+
+test("cooperative audit deadlines stop before the next measurement and expired cursors are discarded", async () => {
+  let now = 1000;
+  class AuditClock extends Date { static now() { return now; } }
+  const { auditTextOverflow, figma } = await loadPluginHelpers({ DateImpl: AuditClock });
+  const { root, texts, page } = overflowAuditFixture(figma, 3);
+  for (const node of texts) {
+    const clone = node.clone;
+    node.clone = function() { now += 12; return clone.call(this); };
+  }
+  const result = await auditTextOverflow(root, { timeBudgetMs: 5 });
+  assert.equal(result.complete, false);
+  assert.equal(result.incompleteReason, "time_limit");
+  assert.equal(result.batch.textCount, 1);
+  assert.equal(result.batch.elapsedMs, 12, "one Figma API call cannot be interrupted midway");
+  assert.deepEqual(page.children, [root]);
+  now += 5 * 60_000 + 1;
+  await assert.rejects(auditTextOverflow(root, { cursor: result.nextCursor }), /unavailable or expired/);
+});
+
+test("audit cursors are single-use and scoped to frame, page, options and plugin runtime", async () => {
+  const { auditTextOverflow, figma } = await loadPluginHelpers();
+  const { root } = overflowAuditFixture(figma, 3);
+  const first = await auditTextOverflow(root, { maxTextNodes: 1 });
+  await assert.rejects(auditTextOverflow({ ...root, id: "other" }, { cursor: first.nextCursor }), /does not match/);
+  await assert.rejects(auditTextOverflow(root, { includeHidden: true, cursor: first.nextCursor }), /does not match/);
+  figma.currentPage.id = "other-page";
+  await assert.rejects(auditTextOverflow(root, { cursor: first.nextCursor }), /does not match/);
+  figma.currentPage.id = "0:1";
+  const resumed = await auditTextOverflow(root, { maxTextNodes: 1, cursor: first.nextCursor });
+  assert.equal(resumed.text[0].id, root.children[1].id);
+  await assert.rejects(auditTextOverflow(root, { cursor: first.nextCursor }), /unavailable or expired/);
+  const freshRuntime = await loadPluginHelpers();
+  await assert.rejects(freshRuntime.auditTextOverflow(root, { cursor: resumed.nextCursor }), /unavailable or expired/);
+  root.children.push(styledText("new-text", "New", root));
+  await assert.rejects(auditTextOverflow(root, { cursor: resumed.nextCursor }), /frame changed/);
+});
+
+test("abandoned audit continuations have a bounded cache", async () => {
+  const { auditTextOverflow, figma } = await loadPluginHelpers();
+  const audits = [];
+  for (let index = 0; index < 9; index++) {
+    const { root } = overflowAuditFixture(figma, 2, `audit:${index}`);
+    audits.push({ root, result: await auditTextOverflow(root, { maxTextNodes: 1 }) });
+  }
+  await assert.rejects(auditTextOverflow(audits[0].root, { cursor: audits[0].result.nextCursor }), /unavailable or expired/);
+  const last = audits.at(-1);
+  assert.equal((await auditTextOverflow(last.root, { cursor: last.result.nextCursor })).complete, true);
+});
+
+test("partial audits keep packaged review and copy-update verification incomplete", async () => {
+  const { execute, figma } = await loadPluginHelpers();
+  const { root } = overflowAuditFixture(figma, 41);
+  const review = await execute("prepareReviewData", { nodeIds: [root.id], detail: "summary", auditOverflow: true });
+  assert.equal(review.verificationComplete, false);
+  assert.equal(review.overflowAudits[0].complete, false);
+  assert.ok(review.overflowAudits[0].nextCursor);
+  const updated = await execute("applyCopyUpdates", { updates: [], auditFrames: [root.id], exportFrames: [], includeHidden: false });
+  assert.equal(updated.verificationComplete, false);
+  assert.equal(updated.audits[0].result.complete, false);
+  assert.ok(updated.audits[0].result.nextCursor);
+});
+
+test("known bridge edits invalidate outstanding audit cursors before resumption", async () => {
+  const { auditTextOverflow, execute, figma } = await loadPluginHelpers();
+  const { root, texts } = overflowAuditFixture(figma, 3);
+  const partial = await auditTextOverflow(root, { maxTextNodes: 1 });
+  await execute("moveResizeReparent", { nodeId: texts[0].id, x: 200 });
+  await assert.rejects(auditTextOverflow(root, { cursor: partial.nextCursor }), /unavailable or expired/);
 });
 
 test("visibility and overflow audit exclude opacity-zero descendants by default", async () => {
@@ -378,7 +633,7 @@ test("compose frame removes the entire new subtree when a later element fails", 
   assert.equal(page.children.length, 0);
 });
 
-test("compose frame can build native panels inside a section with root auto-layout", async () => {
+test("compose frame builds native panels with direct image fills and audits required image areas", async () => {
   const { composeFrame, figma } = await loadPluginHelpers();
   const section = {
     id: "7:1", name: "Reference board", type: "SECTION", x: 100, y: 100, width: 800, height: 600, visible: true, opacity: 1, children: [],
@@ -389,7 +644,8 @@ test("compose frame can build native panels inside a section with root auto-layo
       this.children.push(child);
     },
   };
-  const page = configurePage(figma, [section]);
+  const sourceImage = { id: "7:image", name: "Approved image", type: "RECTANGLE", x: 1_000, y: 0, width: 100, height: 100, visible: true, opacity: 1, fills: [{ type: "IMAGE", imageHash: "hash-1", scaleMode: "FILL" }], strokes: [], children: [] };
+  const page = configurePage(figma, [section, sourceImage]);
   let nextId = 2;
   figma.createFrame = () => {
     const node = {
@@ -406,11 +662,25 @@ test("compose frame can build native panels inside a section with root auto-layo
     page.appendChild(node);
     return node;
   };
+  figma.createRectangle = () => {
+    const node = {
+      id: `7:${nextId++}`, name: "", type: "RECTANGLE", x: 0, y: 0, width: 100, height: 100, visible: true, opacity: 1, fills: [], strokes: [], children: [], removed: false,
+      resize(width, height) { this.width = width; this.height = height; },
+      remove() { this.removed = true; const index = this.parent?.children?.indexOf(this) ?? -1; if (index >= 0) this.parent.children.splice(index, 1); },
+    };
+    page.appendChild(node);
+    return node;
+  };
+  const progress = [];
   const result = await composeFrame({
     frame: { name: "Native board", parentId: section.id, width: 500, height: 400, x: 20, y: 30, layout: "vertical", itemSpacing: 16, padding: 24 },
-    elements: [{ type: "frame", key: "panel", name: "Panel", width: 452, height: 100, x: 0, y: 0, layout: "none", itemSpacing: 0, padding: 0 }],
+    elements: [
+      { type: "frame", key: "panel", name: "Panel", width: 452, height: 100, x: 0, y: 0, layout: "none", itemSpacing: 0, padding: 0 },
+      { type: "rectangle", key: "photo", parentKey: "panel", name: "Photo", width: 200, height: 80, x: 0, y: 0, imageSourceNodeId: sourceImage.id, imageScaleMode: "FIT", imageRequired: true },
+      { type: "rectangle", key: "missing-photo", parentKey: "panel", name: "Missing photo", width: 200, height: 80, x: 220, y: 0, imageRequired: true },
+    ],
     archiveNodeIds: [], collisionPolicy: "reject", audit: false, export: false,
-  });
+  }, async (update) => { progress.push(update); });
   assert.equal(result.ok, true);
   assert.equal(result.frame.parent.id, section.id);
   assert.equal(section.children[0].layoutMode, "VERTICAL");
@@ -418,6 +688,14 @@ test("compose frame can build native panels inside a section with root auto-layo
   assert.equal(section.children[0].paddingTop, 24);
   assert.equal(result.elements[0].type, "FRAME");
   assert.equal(result.placement.clear, true);
+  const photo = section.children[0].children[0].children[0];
+  assert.equal(photo.fills[0].imageHash, "hash-1");
+  assert.equal(photo.fills[0].scaleMode, "FIT");
+  assert.equal(result.imageAudit.requiredCount, 2);
+  assert.equal(result.imageAudit.filledCount, 1);
+  assert.equal(result.imageAudit.warningCount, 1);
+  assert.equal(result.verificationComplete, false);
+  assert.deepEqual(progress.map((update) => update.phase), ["preflight", "root", "elements", "elements", "elements", "image-audit", "complete"]);
 });
 
 test("canvas layout reports sections, occupied bounds, and proposed sibling collisions", async () => {
@@ -622,6 +900,106 @@ test("composition archives originals only after verification and preserves repla
   assert.equal(page.children.find((node) => node.id === result.frame.id).removed, false);
 });
 
+test("an incomplete composition text audit preserves the previous layout", async () => {
+  const { composeFrame, figma } = await loadPluginHelpers();
+  const { page, first, second, input } = compositionFixture(figma);
+  input.audit = true;
+  input.elements = Array.from({ length: 401 }, (_, index) => ({ type: "frame", key: `nested-${index}`, name: `Frame ${index}`, width: 5, height: 5, x: 0, y: 0, layout: "none", itemSpacing: 0, padding: 0 }));
+  const result = await composeFrame(input);
+  assert.equal(result.audits[0].result.complete, false);
+  assert.equal(result.audits[0].result.incompleteReason, "traversal_limit");
+  assert.ok(result.audits[0].result.nextCursor);
+  assert.equal(result.verificationComplete, false);
+  assert.equal(result.archived, undefined);
+  assert.match(result.archiveSkipped.reason, /incomplete/);
+  assert.equal(first.parent, page);
+  assert.equal(first.visible, true);
+  assert.equal(second.parent, page);
+  assert.equal(second.removed, false);
+});
+
+test("composition preserves originals when a required image area is empty", async () => {
+  const { composeFrame, figma } = await loadPluginHelpers();
+  const { page, first, second, input } = compositionFixture(figma);
+  input.elements = [{ type: "frame", key: "photo", name: "Required photo", width: 80, height: 80, x: 0, y: 0, layout: "none", itemSpacing: 0, padding: 0, imageRequired: true }];
+  const result = await composeFrame(input);
+  assert.equal(result.verificationComplete, false);
+  assert.equal(result.imageAudit.warningCount, 1);
+  assert.deepEqual(Array.from(result.archiveSkipped.nodeIds), [first.id, second.id]);
+  assert.equal(page.children.some((node) => node.type === "GROUP"), false);
+  assert.equal(first.parent, page);
+  assert.equal(second.parent, page);
+});
+
+for (const hiddenBy of ["paint-visible", "paint-opacity", "node-opacity", "ancestor-opacity", "root-opacity", "page-visible", "none"]) {
+  test(`required image audit handles ${hiddenBy} before archiving`, async () => {
+    const { composeFrame, figma } = await loadPluginHelpers();
+    const { page, first, second, input } = compositionFixture(figma);
+    first.fills = [{ type: "IMAGE", imageHash: "approved", scaleMode: "FILL",
+      ...(hiddenBy === "paint-visible" ? { visible: false } : {}),
+      ...(hiddenBy === "paint-opacity" ? { opacity: 0 } : {}),
+    }];
+    if (hiddenBy === "root-opacity") input.frame.opacity = 0;
+    if (hiddenBy === "page-visible") page.visible = false;
+    input.elements = [
+      { type: "frame", key: "panel", name: "Panel", width: 90, height: 90, x: 0, y: 0, layout: "none", opacity: hiddenBy === "ancestor-opacity" ? 0 : 1 },
+      { type: "frame", key: "photo", parentKey: "panel", name: "Photo", width: 80, height: 80, x: 0, y: 0, layout: "none", imageSourceNodeId: first.id, imageRequired: true, opacity: hiddenBy === "node-opacity" ? 0 : 1 },
+    ];
+    const result = await composeFrame(input);
+    const visible = hiddenBy === "none";
+    assert.equal(result.verificationComplete, visible);
+    assert.equal(result.imageAudit.warningCount, visible ? 0 : 1);
+    assert.equal(Boolean(result.archived), visible);
+    if (!visible) {
+      assert.equal(first.parent, page);
+      assert.equal(second.parent, page);
+      assert.equal(first.visible, true);
+      assert.deepEqual(Array.from(result.archiveSkipped.nodeIds), [first.id, second.id]);
+    }
+  });
+}
+
+for (const mode of ["inherited-changed", "inherited-proportional", "explicit-crop", "explicit-transform"]) {
+  test(`composition and direct image copy handle ${mode} crop`, async () => {
+    const { composeFrame, execute, figma } = await loadPluginHelpers();
+    const { first, sibling, input, page } = compositionFixture(figma);
+    const crop = [[1, 0, 0.2], [0, 1, 0.1]];
+    first.width = 200; first.height = 100;
+    first.fills = [{ type: "IMAGE", imageHash: "approved", scaleMode: "CROP", imageTransform: crop }];
+    const width = mode === "inherited-proportional" ? 100 : 80;
+    const height = mode === "inherited-proportional" ? 50 : 80;
+    sibling.width = width; sibling.height = height;
+    const scaleMode = mode === "explicit-crop" ? "CROP" : undefined;
+    const imageTransform = mode === "explicit-transform" ? [[0.8, 0, 0], [0, 0.8, 0]] : undefined;
+    const copied = await execute("copyImageFill", { sourceNodeId: first.id, targetNodeId: sibling.id, scaleMode, imageTransform });
+    const adjusted = mode === "inherited-changed";
+    assert.equal(copied.image.scaleMode, adjusted ? "FILL" : "CROP");
+    assert.equal(Boolean(copied.image.adjustment), adjusted);
+    assert.equal(JSON.stringify(sibling.fills[0].imageTransform), JSON.stringify(adjusted ? undefined : imageTransform ?? crop));
+    input.elements = [{ type: "frame", key: "photo", name: "Photo", width, height, x: 0, y: 0, layout: "none", imageSourceNodeId: first.id, imageScaleMode: scaleMode, imageTransform }];
+    const result = await composeFrame(input);
+    const root = page.children.find((node) => node.id === result.frame.id);
+    assert.equal(root.children[0].fills[0].scaleMode, adjusted ? "FILL" : "CROP");
+    assert.equal(JSON.stringify(root.children[0].fills[0].imageTransform), JSON.stringify(adjusted ? undefined : imageTransform ?? crop));
+    assert.equal(result.imageFillAdjustments.length, adjusted ? 1 : 0);
+    assert.equal(result.verificationComplete, true);
+  });
+}
+
+test("a final progress connection failure preserves the committed layout and archive", async () => {
+  const { composeFrame, figma } = await loadPluginHelpers();
+  const { page, first, second, input } = compositionFixture(figma);
+  const result = await composeFrame(input, async ({ phase }) => {
+    if (phase === "complete") { const error = new Error("Session replaced"); error.status = 409; throw error; }
+  });
+  const replacement = page.children.find((node) => node.id === result.frame.id);
+  const archive = page.children.find((node) => node.type === "GROUP");
+  assert.equal(replacement.removed, false);
+  assert.equal(archive.visible, false);
+  assert.deepEqual(archive.children, [first, second]);
+  assert.equal(archive.data["figma_local_bridge.replacementNodeId"], replacement.id);
+});
+
 
 for (const failure of ["target", "style", "font"]) {
   test(`named style preflights ${failure} failures before any mutation`, async () => {
@@ -649,7 +1027,7 @@ test("named paint style rejects incompatible style type without writes", async (
 });
 
 for (const operation of ["named", "copy"]) {
-  test(`${operation} style setter failure reports exact partial target status`, async () => {
+  test(`${operation} style setter failure reports exact attempted target status`, async () => {
     const { applyDesignStyle, copyStyleFromNode, figma } = await loadPluginHelpers();
     const writes = [];
     const source = { id: "source", type: "RECTANGLE", fills: [] };
@@ -667,10 +1045,10 @@ for (const operation of ["named", "copy"]) {
       : await copyStyleFromNode({ sourceNodeId: source.id, targetNodeIds: targets.map((n) => n.id), aspects: ["fills"] });
     assert.equal(result.ok, false);
     assert.equal(result.partial, true);
-    assert.deepEqual(Array.from(result.completedNodeIds), ["a"]);
+    assert.deepEqual(Array.from(result.completedNodeIds), operation === "named" ? ["a", "c"] : ["a"]);
     assert.deepEqual(Array.from(result.potentiallyMutatedNodeIds), ["b"]);
-    assert.deepEqual(Array.from(result.unattemptedNodeIds), ["c"]);
-    assert.deepEqual(writes, ["a", "b"]);
+    assert.deepEqual(Array.from(result.unattemptedNodeIds), operation === "named" ? [] : ["c"]);
+    assert.deepEqual(writes, operation === "named" ? ["a", "b", "c"] : ["a", "b"]);
     assert.doesNotMatch(result.error, /private/);
   });
 }
@@ -714,7 +1092,7 @@ test("copy style supports first-span mixed typography and visual aspects", async
 });
 
 for (const operation of ["named", "copy"]) {
-  test(`${operation} style reports completed writes when viewport preparation fails`, async () => {
+  test(`${operation} style ${operation === "named" ? "avoids unnecessary viewport work" : "reports completed writes when viewport preparation fails"}`, async () => {
     const { applyDesignStyle, copyStyleFromNode, figma } = await loadPluginHelpers();
     const source = { id: "source", type: "RECTANGLE", fills: [] };
     const target = { id: "target", type: "RECTANGLE", fills: [], setFillStyleIdAsync: async () => {} };
@@ -724,9 +1102,262 @@ for (const operation of ["named", "copy"]) {
     const result = operation === "named"
       ? await applyDesignStyle({ targetNodeIds: [target.id], styleId: "style", aspect: "fill" })
       : await copyStyleFromNode({ sourceNodeId: source.id, targetNodeIds: [target.id], aspects: ["fills"] });
-    assert.equal(result.partial, true);
-    assert.deepEqual(Array.from(result.completedNodeIds), [target.id]);
-    assert.equal(result.potentiallyMutatedNodeIds.length, 0);
-    assert.equal(result.unattemptedNodeIds.length, 0);
+    if (operation === "named") {
+      assert.equal(result.partial, undefined);
+      assert.deepEqual(Array.from(result.mutatedNodeIds), [target.id]);
+    } else {
+      assert.equal(result.partial, true);
+      assert.deepEqual(Array.from(result.completedNodeIds), [target.id]);
+      assert.equal(result.potentiallyMutatedNodeIds.length, 0);
+      assert.equal(result.unattemptedNodeIds.length, 0);
+    }
   });
 }
+
+test("an unreachable initial heartbeat prevents a document mutation", async () => {
+  const { executeWithHeartbeat, figma } = await loadPluginHelpers({ fetchImpl: async () => { throw new Error("bridge unavailable"); } });
+  const node = styledText("target", "Keep this copy");
+  configurePage(figma, [node]);
+  await assert.rejects(executeWithHeartbeat("session", { name: "moveResizeReparent", input: { nodeId: node.id, x: 500 } }), /unavailable/);
+  assert.equal(node.x, 10);
+});
+
+test("concurrent heartbeat callers share one outstanding request", async () => {
+  let release;
+  let calls = 0;
+  const { postHeartbeat } = await loadPluginHelpers({ fetchImpl: () => { calls++; return new Promise((resolve) => { release = resolve; }); } });
+  const first = postHeartbeat("session");
+  const second = postHeartbeat("session");
+  assert.equal(first, second);
+  assert.equal(calls, 1);
+  release({ status: 204, ok: true });
+  await Promise.all([first, second]);
+});
+
+test("repeated start shares one loop and a stopped connection cannot publish stale status", async () => {
+  let release;
+  const messages = [];
+  let connects = 0;
+  const helpers = await loadPluginHelpers({ postMessageImpl: (message) => messages.push(message), fetchImpl: () => { connects++; return new Promise((resolve) => { release = resolve; }); } });
+  const first = helpers.startBridge();
+  assert.equal(first, helpers.startBridge());
+  assert.equal(connects, 1);
+  helpers.stopBridge();
+  release({ status: 204, ok: true });
+  await first;
+  assert.equal(messages.some((message) => message.type === "bridge-session"), false);
+});
+
+test("iframe HTTP completes bridge requests without calling native Figma fetch", async () => {
+  const messages = [];
+  let nativeCalls = 0;
+  const helpers = await loadPluginHelpers({ postMessageImpl: (message) => messages.push(message), fetchImpl: async () => { nativeCalls++; throw new Error("native callback registry is unavailable"); } });
+  helpers.useUiTransport();
+  const request = helpers.bridgeRequest("/v1/heartbeat", { method: "POST", body: "{}" });
+  const sent = messages.find((message) => message.type === "bridge-http-request");
+  helpers.finishTransportRequest({ requestId: sent.requestId, ok: true, data: null });
+  assert.equal(await request, null);
+  assert.equal(nativeCalls, 0);
+  assert.equal(helpers.state().pendingRequests, 0);
+});
+
+test("a stalled iframe request cancels at its deadline and ignores a late reply", async () => {
+  const timers = new Map();
+  const messages = [];
+  let next = 0;
+  const helpers = await loadPluginHelpers({ postMessageImpl: (message) => messages.push(message), setTimeoutImpl: (callback) => { timers.set(++next, callback); return next; }, clearTimeoutImpl: (id) => timers.delete(id) });
+  helpers.useUiTransport();
+  const request = helpers.bridgeRequest("/v1/poll?sessionId=session");
+  const rejected = assert.rejects(request, /timed out/);
+  const sent = messages.find((message) => message.type === "bridge-http-request");
+  [...timers.values()][0]();
+  await rejected;
+  assert.ok(messages.some((message) => message.type === "bridge-http-cancel" && message.requestId === sent.requestId));
+  helpers.finishTransportRequest({ requestId: sent.requestId, ok: true, data: { command: { id: "late" } } });
+  assert.equal(helpers.state().pendingRequests, 0);
+});
+
+test("a lost result acknowledgement never replays the same mutation after reconnect", async () => {
+  let helpers;
+  let polls = 0;
+  let acknowledgements = 0;
+  let mutations = 0;
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const command = { id: "same-command", name: "moveResizeReparent", input: { nodeId: "1:2", x: 500 } };
+  helpers = await loadPluginHelpers({ postMessageImpl(message) {
+    if (message.type === "bridge-status" && message.phase === "reconnecting") queueMicrotask(() => helpers.startBridge());
+    if (message.type !== "bridge-http-request") return;
+    queueMicrotask(() => {
+      if (message.path.startsWith("/v1/poll")) {
+        polls++;
+        if (polls > 2) { helpers.stopBridge(); resolveDone(); return; }
+        helpers.finishTransportRequest({ requestId: message.requestId, ok: true, data: { command } });
+      } else if (message.path === "/v1/result") {
+        acknowledgements++;
+        helpers.finishTransportRequest({ requestId: message.requestId, ok: acknowledgements > 1, error: "acknowledgement lost", data: null });
+      } else helpers.finishTransportRequest({ requestId: message.requestId, ok: true, data: null });
+    });
+  } });
+  const node = styledText("1:2", "Keep this copy");
+  let x = node.x;
+  Object.defineProperty(node, "x", { get: () => x, set: (value) => { x = value; mutations++; } });
+  configurePage(helpers.figma, [node]);
+  helpers.figma.commitUndo = () => {};
+  helpers.useUiTransport();
+  const loop = helpers.startBridge();
+  await done;
+  await loop;
+  assert.equal(mutations, 1);
+  assert.equal(acknowledgements, 2);
+});
+
+test("connection labels survive transport reconnect without document metadata writes", async () => {
+  const helpers = await loadPluginHelpers();
+  helpers.setBridgeMetadata({ label: "  Patient portal  ", fileUrl: "https://www.figma.com/design/example/Portal" });
+  assert.equal(helpers.bridgeContext().label, "Patient portal");
+  helpers.stopBridge();
+  assert.equal(helpers.bridgeContext().fileUrl, "https://www.figma.com/design/example/Portal");
+  assert.equal(helpers.bridgeContext().fileKey, undefined);
+  for (const url of ["javascript:alert(1)", "https://evil.example/design/file", "https://www.figma.com.evil.example/design/file", "figma://file/example"])
+    assert.equal(helpers.validFigmaFileUrl(url), false);
+});
+
+test("saved connection details restore in fresh plugin runtimes without leaking between files", async () => {
+  const files = [
+    { data: new Map([["unrelated.setting", "keep"]]), label: "Hims Design", fileUrl: "https://www.figma.com/design/HimsKey/Hims-Design" },
+    { data: new Map(), label: "EllaDx · Website", fileUrl: "https://www.figma.com/design/WebsiteKey/EllaDx-Website" },
+  ];
+  for (const file of files) {
+    const first = await loadPluginHelpers({ documentData: file.data });
+    await first.figma.ui.onmessage({ type: "set-metadata", label: file.label, fileUrl: file.fileUrl });
+    const reopened = await loadPluginHelpers({ documentData: file.data });
+    reopened.loadBridgeMetadata();
+    assert.equal(reopened.bridgeContext().label, file.label);
+    assert.equal(reopened.bridgeContext().fileUrl, file.fileUrl);
+    assert.equal(reopened.metadataPersistenceInfo().metadataRestored, true);
+  }
+  assert.equal(files[0].data.get("unrelated.setting"), "keep");
+  const newFile = await loadPluginHelpers();
+  newFile.loadBridgeMetadata();
+  assert.equal(newFile.bridgeContext().fileUrl, "");
+  assert.equal(newFile.metadataPersistenceInfo().metadataRestored, false);
+});
+
+test("restored metadata is present in the first connection request and session acknowledgement", async () => {
+  let helpers;
+  const messages = [], requests = [];
+  const data = new Map([["figma_local_bridge.connection.v1", JSON.stringify({ version: 1, label: "Saved file", fileUrl: "https://www.figma.com/design/SavedKey/File" })]]);
+  helpers = await loadPluginHelpers({ documentData: data, postMessageImpl: message => messages.push(message), fetchImpl: async (url, options) => {
+    if (options?.body) requests.push({ url, body: JSON.parse(options.body) });
+    if (url.includes("/v1/poll")) helpers.stopBridge();
+    return { status: 204, ok: true };
+  } });
+  await helpers.startBridge();
+  assert.equal(requests[0].body.info.label, "Saved file");
+  assert.equal(requests[0].body.info.fileUrl, "https://www.figma.com/design/SavedKey/File");
+  const session = messages.find(message => message.type === "bridge-session");
+  assert.equal(session.metadataRestored, true);
+  assert.equal(session.metadataPersistence, "document");
+});
+
+test("invalid saved records are ignored and preserved until an explicit successful save", async () => {
+  for (const raw of ["{broken", "null", JSON.stringify({ version: 2, label: "Wrong version", fileUrl: "" }), JSON.stringify({ version: 1, label: 42, fileUrl: "" }), JSON.stringify({ version: 1, label: "Bad URL", fileUrl: "https://evil.example/design/key" }), "x".repeat(16_001)]) {
+    const data = new Map([["figma_local_bridge.connection.v1", raw]]);
+    const helpers = await loadPluginHelpers({ documentData: data });
+    helpers.loadBridgeMetadata();
+    assert.equal(helpers.bridgeContext().fileUrl, "");
+    assert.equal(helpers.bridgeContext().label, "");
+    assert.match(helpers.metadataPersistenceInfo().metadataStorageError, /unreadable/);
+    assert.equal(data.get(helpers.connectionMetadataKey), raw);
+    await helpers.saveBridgeMetadata({ label: "Corrected", fileUrl: "https://www.figma.com/design/CorrectKey/File" });
+    assert.equal(helpers.metadataPersistenceInfo().metadataStorageError, undefined);
+  }
+});
+
+test("failed document storage writes preserve the active identity and never report saved", async () => {
+  const messages = [];
+  const data = new Map([["figma_local_bridge.connection.v1", JSON.stringify({ version: 1, label: "Original", fileUrl: "https://www.figma.com/design/OriginalKey/File" })]]);
+  const helpers = await loadPluginHelpers({ documentData: data, postMessageImpl: message => messages.push(message) });
+  helpers.loadBridgeMetadata();
+  helpers.figma.root.setPluginData = () => { throw new Error("This file is read-only"); };
+  await helpers.figma.ui.onmessage({ type: "set-metadata", label: "New", fileUrl: "https://www.figma.com/design/NewKey/File" });
+  assert.equal(helpers.bridgeContext().label, "Original");
+  assert.equal(JSON.parse(data.get(helpers.connectionMetadataKey)).label, "Original");
+  assert.equal(messages.filter(message => message.type === "bridge-metadata").length, 0);
+  assert.match(messages.at(-1).error, /not saved.*read-only/);
+});
+
+test("clearing connection details removes only its saved record and publishes empty identity fields", async () => {
+  const data = new Map([["unrelated.setting", "keep"]]);
+  const helpers = await loadPluginHelpers({ documentData: data });
+  await helpers.saveBridgeMetadata({ label: "File", fileUrl: "https://www.figma.com/design/FileKey/File" });
+  await helpers.saveBridgeMetadata({ label: "", fileUrl: "" });
+  assert.equal(data.has(helpers.connectionMetadataKey), false);
+  assert.equal(data.get("unrelated.setting"), "keep");
+  assert.equal(helpers.bridgeContext().fileUrl, "");
+  assert.equal(helpers.bridgeContext().documentName, "");
+  const reopened = await loadPluginHelpers({ documentData: data });
+  reopened.loadBridgeMetadata();
+  assert.equal(reopened.bridgeContext().fileUrl, "");
+  assert.equal(reopened.metadataPersistenceInfo().metadataRestored, false);
+});
+
+test("connection details remain saved when the bridge cannot acknowledge the new identity", async () => {
+  const data = new Map(), messages = [];
+  const helpers = await loadPluginHelpers({ documentData: data, postMessageImpl: message => messages.push(message), fetchImpl: async () => { throw new Error("offline"); } });
+  helpers.setSession("session");
+  await helpers.saveBridgeMetadata({ label: "Remembered", fileUrl: "https://www.figma.com/design/RememberedKey/File" });
+  const acknowledgement = messages.at(-1);
+  assert.equal(acknowledgement.persisted, true);
+  assert.equal(acknowledgement.published, false);
+  assert.match(acknowledgement.warning, /Waiting/);
+  const reopened = await loadPluginHelpers({ documentData: data });
+  reopened.loadBridgeMetadata();
+  assert.equal(reopened.bridgeContext().label, "Remembered");
+});
+
+test("rapid metadata saves publish each saved identity in order instead of sharing an older heartbeat", async () => {
+  const published = [], messages = [], data = new Map();
+  let releaseFirst, firstStarted;
+  const started = new Promise(resolve => { firstStarted = resolve; });
+  const helpers = await loadPluginHelpers({ documentData: data, postMessageImpl: message => messages.push(message), fetchImpl: async (_url, options) => {
+    const info = JSON.parse(options.body).info;
+    published.push(info);
+    if (published.length === 1) { firstStarted(); await new Promise(resolve => { releaseFirst = resolve; }); }
+    return { status: 204, ok: true };
+  } });
+  helpers.setSession("session");
+  const first = helpers.figma.ui.onmessage({ type: "set-metadata", label: "First", fileUrl: "https://www.figma.com/design/FirstKey/File" });
+  await started;
+  const second = helpers.figma.ui.onmessage({ type: "set-metadata", label: "Second", fileUrl: "https://www.figma.com/design/SecondKey/File" });
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(published.map(info => info.label), ["First", "Second"]);
+  assert.equal(JSON.parse(data.get(helpers.connectionMetadataKey)).label, "Second");
+  assert.equal(messages.at(-1).label, "Second");
+  assert.equal(messages.at(-1).published, true);
+});
+
+test("routine full copy reads skip broad layout and paint scans until explicitly requested", async () => {
+  const { textContent } = await loadPluginHelpers();
+  let broadScans = 0;
+  const root = { id: "1:1", name: "Frame", type: "FRAME", children: [], findAllWithCriteria: () => [], findAll: () => { broadScans++; return []; } };
+  const ordinary = textContent(root);
+  assert.equal(broadScans, 0);
+  assert.equal(ordinary.layoutDiagnostics, undefined);
+  assert.equal(ordinary.nativePaints, undefined);
+  const audited = textContent(root, { auditLayout: true, auditPaints: true });
+  assert.equal(broadScans, 2);
+  assert.ok(Array.isArray(audited.layoutDiagnostics));
+  assert.ok(Array.isArray(audited.nativePaints));
+});
+
+test("native runtime callback failure requires a fresh plugin and does not retry forever", async () => {
+  let calls = 0;
+  const helpers = await loadPluginHelpers({ fetchImpl: async () => { calls++; throw new Error("Attempted to invoke callback with invalid id -1"); } });
+  await helpers.startBridge();
+  assert.equal(helpers.state().phase, "restart-required");
+  await helpers.startBridge();
+  assert.equal(calls, 1);
+});

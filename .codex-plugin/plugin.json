@@ -1,6 +1,6 @@
 {
   "name": "figma-local-bridge",
-  "version": "0.13.3",
+  "version": "0.14.2-local.2",
   "description": "Inspect and edit the Figma Design file open in Figma Desktop through a local MCP bridge.",
   "author": {
     "name": "David Buck",
@@ -9,7 +9,12 @@
   "homepage": "https://github.com/david-buck/figma-local-bridge#readme",
   "repository": "https://github.com/david-buck/figma-local-bridge",
   "license": "MIT",
-  "keywords": ["figma", "mcp", "design", "local"],
+  "keywords": [
+    "figma",
+    "mcp",
+    "design",
+    "local"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
@@ -18,7 +23,10 @@
     "longDescription": "A local-only MCP bridge and inspect-first workflow for design-system-aware reading, editing, auditing, composing, and exporting of the Figma Design file currently open in Figma Desktop.",
     "developerName": "David Buck",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
     "defaultPrompt": "Inspect the open Figma file and list its artboards.",
     "brandColor": "#7B3FD6",
     "composerIcon": "./assets/icon.png",

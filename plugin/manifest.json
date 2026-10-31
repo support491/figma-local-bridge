@@ -4,11 +4,20 @@
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
-  "editorType": ["figma"],
+  "editorType": [
+    "figma"
+  ],
   "documentAccess": "dynamic-page",
-  "permissions": ["teamlibrary"],
+  "permissions": [
+    "activeusers",
+    "currentuser",
+    "fileusers",
+    "teamlibrary"
+  ],
   "networkAccess": {
-    "allowedDomains": ["http://localhost:3846"],
+    "allowedDomains": [
+      "http://localhost:3846"
+    ],
     "reasoning": "Connects only to the user's locally running MCP bridge on localhost."
   }
 }

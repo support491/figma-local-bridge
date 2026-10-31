@@ -9,10 +9,10 @@ Use an inspect-first sequence. Do not begin by querying arbitrary page nodes or 
 
 ## Required sequence
 
-1. Call `figma_bridge_status`. Continue only when exactly one plugin is connected, and use its reported page name to confirm the expected Figma context.
+1. Call `figma_bridge_status`, then `figma_list_connections`. Confirm the intended connection and page. Pass its runtime ID, stable `file:<key>` or unique exact `name:<saved label>` as `targetId` to every canvas call; never infer the target from the focused Desktop tab. A configured proxy default can pin a known file, but explicit targets remain preferable when working across files. Re-list after a plugin restart or unavailable-target error; never fall back silently to another file.
 2. Call `figma_get_user_preferences` before choosing components, styles, tokens, typography, layout conventions, or copy patterns. Treat only returned confirmed preferences as durable user guidance.
-3. When review feedback is relevant, call `figma_comment_status`, then `figma_list_comments` before editing. Comment access is optional; if it is unavailable, report the missing REST setup without blocking unrelated canvas work.
-4. Call `figma_list_design_system_assets`, then `figma_list_artboards`. Discover verified component/style/token candidates and stable artboard IDs; never guess IDs or recreate an appropriate available component. If the relevant artboard is absent, call `figma_list_pages`, navigate with `figma_navigate_to_page`, then repeat discovery.
+3. This local installation disables Figma REST/comment access. Use user-provided review feedback and continue token-free canvas work. Do not enable API access or ask for a personal access token. In deployments where optional comment access was separately authorized and enabled, list relevant comments before editing.
+4. Call `figma_list_design_system_assets`, then `figma_list_artboards`. Discover verified component/style/token candidates and stable artboard IDs; never guess IDs or recreate an appropriate available component. If the relevant artboard is absent, call `figma_list_pages`, navigate with `figma_navigate_to_page`, then repeat discovery. When new work needs a page that does not exist yet, create it with `figma_create_page` (idempotent by exact name, switches to it).
 5. Identify the relevant artboard or page pair:
    - Call `figma_read_frame_content` with `detail: summary` for one artboard.
    - Call `figma_read_spread_content` with `detail: summary` for a spread, passing `nodeIds` in the order returned by `figma_list_artboards`.
@@ -27,13 +27,21 @@ Use an inspect-first sequence. Do not begin by querying arbitrary page nodes or 
 
 ## Fast review path
 
+Routine reads skip expensive layout diagnostics and native-paint scans. Request those explicitly only when needed; narrow large reads and audits to relevant frames. Keep an operation attached to the same target throughout read, edit, and verification. The server pins composite operations and serializes work per target; separate plugin instances can progress independently.
+
+For an interrupted operation, check `figma_operation_status` using its recovery ID before retrying. A lost reply does not establish that an edit failed. Reuse an ID only for the identical target and inputs. Operation history survives assistant-client restarts while the persistent owner lives; after an owner restart or unknown outcome, inspect the document before deciding what remains.
+
 After artboard discovery, use `figma_prepare_review` only for a visual page/spread review. It reads the copy and optionally audits overflow in one plugin operation, then writes the PNG exports locally without leaving document edits. For copy reconciliation, prefer `figma_read_copy` and overflow auditing so routine work does not consume image tokens.
+
+### Bounded overflow audits
+
+Treat `complete: false` as incomplete evidence even when `warningCount` is zero. Retain each batch’s findings and continue `nextCursor` with the same explicit target, root `nodeId`, and `includeHidden` until complete. `totals` and top-level counts are cumulative; `text` and `batch` describe only the returned batch. Do not repeat copy edits or compositions to continue an audit. Cursors are single-use, expire after five minutes/plugin restart, and are not a frozen document snapshot: start fresh after edits or context changes. Stop by not requesting another batch. Packaged operations with incomplete audits keep `verificationComplete` false and preserve predecessors.
 
 ## Review comments
 
 Comments use Figma's REST API rather than the live plugin connection. Canvas tools remain token-free; `figma_comment_status` reports whether the optional token and file key are configured without revealing the token.
 
-- If comment access is unavailable, direct the user to **Figma API access** in the connected plugin. Never ask them to paste a token into chat or an MCP tool call. The plugin can save it to secure OS storage and verify read access; write access is verified only by an intentional comment write.
+- The user's local setup keeps this feature disabled. Do not change the loopback API endpoint or configure credentials. In other deployments where comment access was explicitly authorized, credentials belong in the plugin's secure setup flow, never in chat or tool calls.
 
 - List comments before editing when the user refers to review feedback. Preserve returned comment IDs, parent IDs, author, resolved state, node/canvas position and timestamps as source data.
 - Post a root comment only at a verified frame ID or explicit canvas coordinates. Reply using the identified root comment ID; do not invent a thread relationship.
@@ -44,6 +52,8 @@ Comments use Figma's REST API rather than the live plugin connection. Canvas too
 ## Layout responsibility and evidence cost
 
 Use the bridge for deterministic mechanics: frame geometry, hierarchy, components, named styles, text bounds, overflow, alignment and mutations. Use this skill for editorial hierarchy, page purpose, content density, print-reading judgement and deciding when an image review is worth its cost.
+
+Use Figma sections to organise a working board, exploration or reference area. Reserve frames for actual design surfaces, reusable layout containers, clipping regions or content that needs its own coordinate system; do not wrap a board in an otherwise empty frame just for organisation.
 
 Reference boards and new canvas areas must use native Figma structure: create a `SECTION` with `figma_create_section`, then place native frames, components and editable text inside it. Never use an imported SVG group as a board, panel system, UI layout, or editable label. Reserve `figma_import_svg` for approved logos, icons and isolated vector artwork.
 
@@ -64,14 +74,15 @@ Treat the bridge preference store as explicit per-user memory, not automatic lea
 
 ## Delegated copy preparation
 
-Use a capable subagent for copy analysis or source-to-Figma diffing when it will reduce context cost, especially across several pages. Do this *before* the live bridge session.
+Use a capable, cost-efficient subagent for copy analysis or source-to-Figma diffing when it will reduce context cost, especially across several pages. Prepare and review the diff before mutations; the lead may capture read-only Figma snapshots first.
 
-- Give the subagent the source copy and a compact, already-captured Figma copy snapshot with frame IDs and text-node IDs.
+- The lead defines the authoritative direction, page scope, source-of-truth order, and any claims or internal notes that must remain unchanged.
+- Give the subagent that task packet, the latest source copy, and a compact Figma copy snapshot with frame IDs and text-node IDs. Escalate ambiguous hierarchy, compliance claims, brand judgement or source conflicts to a stronger model or the lead.
 - Ask it to return a narrow diff packet: frame ID, node ID, exact current text, replacement text and a one-line rationale. Omit unchanged nodes.
 - Keep the subagent read-only. It must not call the local bridge, edit the Figma file, or perform visual verification.
-- The primary agent owns the live bridge connection, makes all mutations serially, and verifies the rendered result.
+- The lead reviews the proposed wording, owns the live bridge connection, makes all mutations serially, and verifies the result. Never apply a subagent's text blindly.
 
-The bridge has one live plugin connection and Figma mutations are serial. Delegation improves preparation quality and token use; it does not make the live write path parallel or safer.
+The bridge supports separate connected files. Mutations stay serial within each target; delegated preparation does not authorize concurrent writers to the same physical Figma file.
 
 ## External copy-sync recipe
 
@@ -88,7 +99,11 @@ Use this flow only after the user identifies which source is authoritative and t
 
 ### Timeout recovery
 
-If a mutation batch times out, do not retry it immediately. Reconnect the plugin if needed, then re-read the affected visible text and determine which updates landed. Apply only the remaining changes with fresh `expectedText` guards. Do not create an alternate frame, hide the old one or issue a second blind batch to recover.
+For a tracked composition, keep its operation ID and call `figma_operation_status` after interruption or caller timeout. If it is queued or running, wait; if it succeeded, use the returned result; if it failed, diagnose that error. Reuse the same operation ID to resume the request and never start a duplicate while its outcome remains available or unknown.
+
+Recovery IDs are also included in composition error responses. If status reports no operation for that ID, inspect the affected document before starting again; a restarted bridge may have lost its in-memory history. An unknown outcome always requires inspection, not a new blind composition.
+
+For an untracked mutation batch, do not retry immediately. Reconnect the plugin if needed, then re-read the affected visible text and determine which updates landed. Apply only the remaining changes with fresh `expectedText` guards. Do not create an alternate frame, hide the old one or issue a second blind batch to recover.
 
 ## Re-layout a page recipe
 
@@ -96,16 +111,24 @@ Use this deterministic flow when replacing an existing brochure page or artboard
 
 1. Confirm the bridge/page, list artboards, read the exact target with `detail: summary`, and export its current PNG before changing anything.
 2. Use `figma_list_design_system_assets` and `figma_list_page_tokens` to discover verified components, variables, styles, colours, and fonts. Prefer an appropriate component instance or named style; use `figma_copy_style_from_node` when a known source node is the clearest brand reference. Never approximate a value already present in the file.
-3. Define one clearly named replacement frame. Call `figma_compose_frame` with ordered frame/rectangle/text elements; use styled spans for mixed emphasis inside one text layer. Keep keys unique and declare parent elements before their children.
-4. Prefer supplying explicit previous sibling IDs in `archiveNodeIds`. The composer must build successfully before it groups those nodes into the hidden named archive. If composition and archiving are separate, verify the replacement first, then call `figma_supersede_layout` or `figma_archive_nodes` with the replacement ID.
-5. Inspect the compact audit and local PNG returned by the composer. If verification is incomplete, preserve the previous layout and diagnose before retrying. Use a full read only when the summary lacks necessary hierarchy.
-6. Re-read the replacement in summary mode and confirm the archive name/replacement relationship. Do not delete the archived group unless the user later identifies it for permanent removal.
+3. Define one clearly named replacement frame. Use `figma_start_composition` for a potentially slow board, then poll `figma_operation_status`; use `figma_compose_frame` directly only when a blocking call is appropriate. Keep keys unique and declare parent elements before their children.
+4. Build ordered native frame/rectangle/text elements and use styled spans for mixed emphasis. For an approved image already in Figma, set `imageSourceNodeId` on its composed frame or rectangle instead of duplicating and reparenting nodes. Set `imageRequired: true` wherever an image is necessary to call the board complete.
+5. Prefer supplying explicit previous sibling IDs in `archiveNodeIds`. The composer archives them only after text/export/image verification succeeds. If verification is incomplete, inspect `imageAudit`, preserve the previous layout, and fix the replacement before retrying or archiving separately.
+6. Inspect the compact audits and local PNG returned by the composer. Use a full read only when the summary lacks necessary hierarchy.
+7. Re-read the replacement in summary mode and confirm the archive name/replacement relationship. Do not delete the archived group unless the user later identifies it for permanent removal.
+
+## Font swap recipe
+
+1. Call `figma_font_inventory` per page, or per section on large pages. It counts text ranges by font and by what sets each font: library style, local style, main component, or the layer itself.
+2. Library styles change only in the library file: update them there with `figma_set_text_style_fonts`, then the user publishes the library and accepts the update in each consuming file.
+3. In each file, run `figma_retype_font` with `dryRun: true`, read the counts, then repeat with `dryRun: false`. Use `exceptCharacters` to keep wordmarks in their brand face. Text inside instances follows its main component and is skipped.
+4. Re-run the inventory to confirm what remains.
 
 ## Reference-board recipe
 
 1. Call `figma_inspect_canvas_layout` without a target to read native sections and the occupied top-level canvas envelope. Figma pages are unbounded; do not mistake that envelope for a page boundary.
 2. Collision-check the proposed section rectangle. Create it with `figma_create_section` only when the result is clear, or when the user explicitly accepts an intentional overlap.
-3. Use `figma_compose_frame` with the new section ID as `frame.parentId`. Build panels from native frames/components and labels from editable natural-case Figma text with `textCase` styling.
+3. Compose with the new section ID as `frame.parentId`; use `figma_start_composition` plus status polling when the board may be slow. Build panels from native frames/components and labels from editable natural-case Figma text with `textCase` styling.
 4. Treat a blank response, `COMPOSITION_EMPTY_OR_INCOMPLETE`, or any other composition failure as a hard stop. Inspect and retry the native path; never switch to an SVG layout workaround.
 5. Call `figma_inspect_canvas_layout` with the created node ID to verify sibling collisions. Use a targeted screenshot when adjacency or visual overlap still requires judgement.
 
@@ -122,12 +145,16 @@ Use this deterministic flow when replacing an existing brochure page or artboard
 - Preserve design-system linkage. Prefer `figma_create_component_instance`, `figma_apply_design_style`, and bound variables over detached copies or hand-built imitations.
 - Use `figma_update_text` only for an identified text node. If the intended change is presentation-only casing, do not call it; call `figma_set_text_case` and verify that the stored characters remain unchanged. Use structural tools only after inspecting hierarchy and bounds.
 - Make small, reversible batches and verify each batch before continuing.
+- For frame or layer renaming, use a dedicated rename tool when available. Otherwise, when native Figma UI control is available, select verified IDs with `figma_set_selection` and use the native rename UI (`Cmd+R` on macOS). Inspect the full multi-layer rename preview and verify every ID-to-name mapping; rename individually when the preview is ambiguous. Re-read `figma_list_artboards` after each batch. If neither path is available, report the missing capability.
 - For copy-only work, overwrite the existing visible text layers. Do not create duplicate layouts, hide existing layers, or reduce old nodes to zero opacity. Use replacement/archival only for an explicitly requested layout change, and state the result clearly.
 - Prefer `figma_archive_nodes` or `figma_supersede_layout` over opacity-zero superseded layers. Archive only explicit siblings and always record the replacement when one exists.
-- Use `figma_compose_frame` for bounded page composition that would otherwise require many serial creation calls. Treat its audit and exported PNG as required verification, not optional decoration.
+- Use `figma_start_composition` plus `figma_operation_status` for a potentially slow board. Use `figma_compose_frame` for a bounded composition that is expected to finish within the blocking call. Treat text, export, and required-image audits as completion evidence.
+- Reuse an existing approved Figma image with a composed element's `imageSourceNodeId`. Mark visually necessary image areas with `imageRequired: true`; never call a board finished or archive its predecessor while `imageAudit.warningCount` is non-zero.
 - Before placing a new section or top-level frame, inspect canvas bounds and collision-check the proposed rectangle. After placement, collision-check the actual node and visually inspect any uncertain adjacency; coordinate assumptions alone are not verification.
-- Use `figma_place_local_image` only for an absolute local image path the user explicitly placed in scope. Prefer `figma_copy_image_fill` when an approved image already exists in Figma.
+- Use `figma_place_local_image` only for an absolute local image path the user explicitly placed in scope or an HTTPS image URL the user explicitly approved. URL fetches are limited to public IP destinations, revalidated across at most five redirects, capped at 25 MB, and checked by image signature. Prefer `figma_copy_image_fill` when an approved image already exists in Figma.
+- Place images at their intended final dimensions before applying custom crops. Resizing a CROP-filled node to a different aspect ratio switches it to centered FILL. Composition and image-copy tools also normalise an inherited CROP when source and target proportions differ, unless an explicit crop mode or transform was supplied. Review reported adjustments and the focal point afterwards; do not assume the old custom crop survives.
+- A required image must be visible: hidden or transparent image paints, elements and ancestors fail the image audit and preserve the previous layout. Inspect warnings before calling a replacement complete.
 - Delete only a clearly stray element that the user identified. Otherwise preserve it, including superseded or hidden elements.
 - Use `figma_screenshot` for a targeted, one-off visual check. Use `figma_export_frame_png` only for a full-page/layout review, imagery, comparison or an artefact that needs to be retained; do not export routine copy-only changes.
-- Keep bridge calls serial and in one task. A newer open plugin deliberately takes over the single local connection; the displaced plugin stops retrying.
+- Keep calls serial within each logical edit workflow and pin every call to the chosen target. A transport reconnect replaces only that plugin runtime's old session. Other connected files remain attached. Coordinate multiple writers to the same document; never infer file identity from matching page or node IDs.
 - If the `figma_local` tools are absent from the task, stop and report that Codex has not loaded the configured MCP server. Do not substitute the hosted Figma MCP without the user's permission.

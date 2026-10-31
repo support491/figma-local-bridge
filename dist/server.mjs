@@ -3306,8 +3306,8 @@ var require_utils = __commonJS({
     var HOST_DELIMS = { "@": "%40", "/": "%2F", "?": "%3F", "#": "%23", ":": "%3A" };
     var HOST_DELIM_RE = /[@/?#:]/g;
     var HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
-    function reescapeHostDelimiters(host2, isIP) {
-      const re = isIP ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
+    function reescapeHostDelimiters(host2, isIP2) {
+      const re = isIP2 ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
       re.lastIndex = 0;
       return host2.replace(re, (ch) => HOST_DELIMS[ch]);
     }
@@ -3550,7 +3550,7 @@ var require_schemes = __commonJS({
         serialize: httpSerialize
       }
     );
-    var https = (
+    var https2 = (
       /** @type {SchemeHandler} */
       {
         scheme: "https",
@@ -3599,7 +3599,7 @@ var require_schemes = __commonJS({
       /** @type {Record<SchemeName, SchemeHandler>} */
       {
         http: http2,
-        https,
+        https: https2,
         ws,
         wss,
         urn,
@@ -3796,7 +3796,7 @@ var require_fast_uri = __commonJS({
         fragment: void 0
       };
       let malformedAuthorityOrPort = false;
-      let isIP = false;
+      let isIP2 = false;
       if (options.reference === "suffix") {
         if (options.scheme) {
           uri = options.scheme + ":" + uri;
@@ -3845,9 +3845,9 @@ var require_fast_uri = __commonJS({
           if (ipv4result === false) {
             const ipv6result = normalizeIPv6(parsed.host);
             parsed.host = ipv6result.host.toLowerCase();
-            isIP = ipv6result.isIPV6;
+            isIP2 = ipv6result.isIPV6;
           } else {
-            isIP = true;
+            isIP2 = true;
           }
         }
         if (parsed.scheme === void 0 && parsed.userinfo === void 0 && parsed.host === void 0 && parsed.port === void 0 && parsed.query === void 0 && !parsed.path) {
@@ -3864,7 +3864,7 @@ var require_fast_uri = __commonJS({
         }
         const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
         if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
-          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
+          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP2 === false && nonSimpleDomain(parsed.host)) {
             try {
               parsed.host = new URL("http://" + parsed.host).hostname;
             } catch (e) {
@@ -3878,7 +3878,7 @@ var require_fast_uri = __commonJS({
               parsed.scheme = unescape(parsed.scheme);
             }
             if (parsed.host !== void 0) {
-              parsed.host = reescapeHostDelimiters(unescape(parsed.host), isIP);
+              parsed.host = reescapeHostDelimiters(unescape(parsed.host), isIP2);
             }
           }
           if (parsed.path) {
@@ -6916,9 +6916,13 @@ var require_dist = __commonJS({
 
 // server.mjs
 import http from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
+import https from "node:https";
+import { lookup } from "node:dns/promises";
 import { randomUUID } from "node:crypto";
 import { mkdir as mkdir2, open, readFile as readFile2, rename as rename2, stat, unlink as unlink2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
+import { isIP } from "node:net";
 import { isAbsolute, join as join2 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
@@ -31231,17 +31235,30 @@ function createCredentialStore(options = {}) {
 
 // server.mjs
 var host = process.env.FIGMA_BRIDGE_HOST ?? "127.0.0.1";
+if (!["127.0.0.1", "::1"].includes(host)) throw new Error("FIGMA_BRIDGE_HOST must be a loopback IP (127.0.0.1 or ::1).");
+var httpOwnerOnly = process.argv.includes("--http-owner");
+var proxyOnly = process.argv.includes("--proxy-only");
+if (httpOwnerOnly && proxyOnly) throw new Error("Choose either --http-owner or --proxy-only.");
+var defaultTargetId = process.env.FIGMA_BRIDGE_TARGET?.trim() || void 0;
+var targetContext = new AsyncLocalStorage();
+var leaseDurationMs = 15e3;
+var bridgeBaseUrl = `http://${host === "::1" ? "[::1]" : host}`;
 var port = Number.parseInt(process.env.FIGMA_BRIDGE_PORT ?? "3846", 10);
 var launchParentPid = process.ppid;
 var sessionFreshnessMs = 35e3;
 var replacedSessionRetentionMs = 5 * 6e4;
 var proxyHealthIntervalMs = 2e3;
-var bridgeVersion = "0.13.3";
+var operationRetentionMs = 60 * 6e4;
+var operationHardTimeoutMs = 30 * 6e4;
+var bridgeVersion = "0.14.2-local.2";
+var trackedCompositionCapability = "tracked-composition-v1";
+var compositionImageCapability = "composition-image-audit-v2";
 var exportDirectory = process.env.FIGMA_EXPORT_DIR ?? join2(homedir(), "Pictures", "Figma MCP Exports");
 var preferencesDirectory = process.env.FIGMA_PREFERENCES_DIR ?? join2(homedir(), ".figma-local-bridge");
 var preferencesPath = join2(preferencesDirectory, "preferences.json");
 var preferencesLockPath = join2(preferencesDirectory, "preferences.lock");
 var apiSettingsPath = join2(preferencesDirectory, "api-settings.json");
+var apiDisabled = process.env.FIGMA_BRIDGE_API_DISABLED === "1";
 var environmentFigmaAccessToken = process.env.FIGMA_ACCESS_TOKEN?.trim();
 var configuredFigmaFileKey = process.env.FIGMA_FILE_KEY?.trim();
 var figmaApiBaseUrl = (process.env.FIGMA_API_BASE_URL ?? "https://api.figma.com").replace(/\/$/, "");
@@ -31251,6 +31268,8 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
 }
 var sessions = /* @__PURE__ */ new Map();
 var replacedSessions = /* @__PURE__ */ new Map();
+var operations = /* @__PURE__ */ new Map();
+var targetFences = /* @__PURE__ */ new Map();
 var bridgeRole = "starting";
 var bridgeListening = false;
 var stopping = false;
@@ -31297,20 +31316,14 @@ function isAllowedBrowserOrigin(origin) {
     return false;
   }
 }
-
-// Only loopback Host headers reach the bridge; blocks DNS-rebinding pages that resolve to 127.0.0.1.
 function isLoopbackHost(hostHeader) {
   if (typeof hostHeader !== "string") return false;
   const match = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(hostHeader.trim().toLowerCase());
   if (!match) return false;
-  const hostname = match[1];
+  const hostname3 = match[1];
   const hostPort = match[2] ?? "80";
-  return ["localhost", "127.0.0.1", String(host).toLowerCase()].includes(hostname) && hostPort === String(port);
+  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname3) && hostPort === String(port);
 }
-
-// Command routes are for local MCP processes only: they never send Origin and always send JSON.
-// Rejecting Origin (including the "null" origin sandboxed iframes use) and non-JSON bodies means a web
-// page cannot drive Figma commands with a no-cors or text/plain request.
 function isJsonRequest(request) {
   const type = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
   return type === "application/json";
@@ -31344,10 +31357,55 @@ function sessionWasReplaced(sessionId) {
 function cleanString(value, maxLength = 200) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : void 0;
 }
+function cleanFigmaFileUrl(value) {
+  if (typeof value !== "string" || value.length > 2e3) return void 0;
+  try {
+    const url2 = new URL(value);
+    if (url2.protocol !== "https:" || !["figma.com", "www.figma.com"].includes(url2.hostname) || url2.username || url2.password) return void 0;
+    url2.search = "";
+    url2.hash = "";
+    return url2.href;
+  } catch {
+    return void 0;
+  }
+}
+function figmaFileKeyFromUrl(value) {
+  const clean = cleanFigmaFileUrl(value);
+  if (!clean) return null;
+  return new URL(clean).pathname.match(/^\/(?:design|file)\/([A-Za-z0-9_-]+)(?:\/|$)/)?.[1] ?? null;
+}
+function savedTargetNames(target) {
+  const info = target.info ?? { label: target.savedLabel, documentName: target.documentName };
+  return [...new Set([info.label, info.documentName].filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+}
+function resolveConnection(targets, requested) {
+  const available = targets.filter((target) => target.connected !== false || target.pendingCommandCount > 0);
+  if (!requested) return available.length === 1 ? available[0] : null;
+  if (typeof requested !== "string" || !requested.trim() || requested.length > 220) throw new Error("A valid Figma target reference is required.");
+  const reference = requested.trim();
+  const runtime = available.find((target) => (target.targetId ?? target.clientId) === reference);
+  if (runtime) return runtime;
+  let matching;
+  if (reference.startsWith("file:")) {
+    const key = reference.slice(5);
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new Error("Figma file reference is invalid. Use file:<key> from figma_list_connections.");
+    matching = available.filter((target) => figmaFileKeyFromUrl(target.info?.fileUrl ?? target.fileUrl) === key);
+  } else {
+    const name = reference.startsWith("name:") ? reference.slice(5) : reference;
+    if (!name || name !== name.trim()) throw new Error("A name reference must contain an exact saved label or document name.");
+    matching = available.filter((target) => savedTargetNames(target).includes(name));
+  }
+  if (matching.length > 1) throw new Error(`More than one active plugin matches ${reference}. Pass a unique runtime targetId from figma_list_connections; no command was sent.`);
+  return matching[0] ?? null;
+}
 function cleanSessionInfo(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries({
     pluginVersion: cleanString(value.pluginVersion, 40),
+    capabilities: Array.isArray(value.capabilities) ? value.capabilities.filter((item) => typeof item === "string").slice(0, 30).map((item) => item.slice(0, 100)) : void 0,
+    label: value.label === "" ? "" : cleanString(value.label, 120),
+    documentName: value.documentName === "" ? "" : cleanString(value.documentName, 200),
+    fileUrl: value.fileUrl === "" ? "" : cleanFigmaFileUrl(value.fileUrl),
     editorType: cleanString(value.editorType, 40),
     pageId: cleanString(value.pageId),
     pageName: cleanString(value.pageName),
@@ -31368,30 +31426,153 @@ function rejectSession(session, message, status = 409, rememberReplacement = fal
   }
   for (const pending of session.pending.values()) {
     clearTimeout(pending.timeout);
-    pending.reject(new Error(message));
+    if (pending.operation) {
+      const dispatched = pending.operation.startedAt !== null;
+      if (dispatched) fenceTarget(session, pending.operation.id, message);
+      settleOperation(pending.operation, dispatched ? "unknown" : "failed", new Error(dispatched ? `${message} The operation was dispatched, so its outcome is unknown. Inspect the affected Figma document before retrying.` : `${message} The operation was not dispatched; no changes were made by this command.`));
+    } else {
+      if (pending.dispatched) fenceTarget(session, pending.id, message);
+      pending.reject(new Error(message));
+    }
   }
   session.pending.clear();
+  session.queue.length = 0;
+  if (session.lease) clearTimeout(session.lease.timer);
+  for (const waiter of session.leaseWaiters ?? []) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error(message));
+  }
+  session.leaseWaiters = [];
   sessions.delete(session.sessionId);
 }
 function activeSessions(now = Date.now()) {
   return [...sessions.values()].filter((session) => now - session.lastSeenAt < sessionFreshnessMs || session.pending.size > 0);
 }
-function bridgeStatusSnapshot() {
-  const active = activeSessions();
-  const session = active.length === 1 ? active[0] : null;
+function targetSnapshot(session) {
+  const fresh = Date.now() - session.lastSeenAt < sessionFreshnessMs;
   return {
-    connected: active.length === 1,
-    activePluginCount: active.length,
-    bridge: { host, port, version: bridgeVersion, role: "owner", processId: process.pid },
-    ...session ? {
-      plugin: {
-        ...session.info,
-        connectedAt: new Date(session.connectedAt).toISOString(),
-        lastSeenAt: new Date(session.lastSeenAt).toISOString(),
-        pendingCommandCount: session.pending.size
-      }
-    } : {}
+    ...session.info,
+    targetId: session.clientId,
+    clientId: session.clientId,
+    sessionId: session.sessionId,
+    label: session.info.label || session.info.documentName || session.info.pageName || session.clientId,
+    savedLabel: session.info.label || null,
+    namedTargetRefs: savedTargetNames(session).map((name) => `name:${name}`),
+    stableTargetRef: figmaFileKeyFromUrl(session.info.fileUrl) ? `file:${figmaFileKeyFromUrl(session.info.fileUrl)}` : null,
+    possibleDuplicateTargetIds: [...sessions.values()].filter((other) => other !== session && isOperationalSession(other) && (figmaFileKeyFromUrl(session.info.fileUrl) && figmaFileKeyFromUrl(other.info.fileUrl) === figmaFileKeyFromUrl(session.info.fileUrl) || session.info.fileKey && other.info.fileKey === session.info.fileKey)).map((other) => other.clientId),
+    connected: fresh,
+    health: fresh ? "healthy" : "stale",
+    connectedAt: new Date(session.connectedAt).toISOString(),
+    lastSeenAt: new Date(session.lastSeenAt).toISOString(),
+    busy: session.pending.size > 0 || Boolean(session.lease) || targetFences.has(session.clientId),
+    pendingCommandCount: session.pending.size,
+    uncertainOperation: targetFences.get(session.clientId) ?? null,
+    activeOperations: [...session.pending.values()].filter((pending) => pending.operation).map((pending) => operationSnapshot(pending.operation, false))
   };
+}
+function isOperationalSession(session, now = Date.now()) {
+  return now - session.lastSeenAt < sessionFreshnessMs || session.pending.size > 0 || Boolean(session.lease) || targetFences.has(session.clientId);
+}
+function isOperationalTarget(target) {
+  return Boolean(target.connected || target.busy || target.pendingCommandCount > 0 || target.uncertainOperation);
+}
+function pruneInactiveSessions(now = Date.now()) {
+  for (const session of sessions.values()) {
+    if (now - session.lastSeenAt > 5 * 6e4 && session.pending.size === 0 && !session.lease && !targetFences.has(session.clientId)) {
+      rejectSession(session, "Inactive Figma plugin session expired.", 401);
+    }
+  }
+}
+function discoverableTargets() {
+  return bridgeStatusSnapshot().targets.filter(isOperationalTarget);
+}
+function bridgeStatusSnapshot() {
+  pruneInactiveSessions();
+  const active = activeSessions();
+  return {
+    connected: active.length > 0,
+    activePluginCount: active.length,
+    targets: [...sessions.values()].map(targetSnapshot),
+    bridge: {
+      host,
+      port,
+      version: bridgeVersion,
+      role: "owner",
+      processId: process.pid,
+      mode: httpOwnerOnly ? "http-owner" : "stdio-owner",
+      capabilities: [trackedCompositionCapability, "multi-target-v1", "target-leases-v1"]
+    },
+    ...active.length === 1 ? { plugin: targetSnapshot(active[0]) } : {}
+  };
+}
+function connectedSession(targetId = targetContext.getStore()?.targetId ?? defaultTargetId, sessionId) {
+  const live = activeSessions();
+  const session = resolveConnection(live, targetId);
+  if (!session) {
+    if (targetId) throw new Error(`Figma target ${targetId} is unavailable. Call figma_list_connections and explicitly choose its targetId.`);
+    if (live.length > 1) throw new Error("More than one Figma plugin is connected. Pass targetId from figma_list_connections; no command was sent.");
+    throw new Error("No Figma plugin is connected. Open Local MCP Bridge in the target Figma file and leave its panel open.");
+  }
+  if (sessionId && session.sessionId !== sessionId) throw new Error("The target session changed. Re-read its state before retrying; no command was sent.");
+  return session;
+}
+function fenceTarget(session, operationId, reason) {
+  targetFences.set(session.clientId, { operationId, targetId: session.clientId, sessionId: session.sessionId, reason, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
+}
+function acknowledgeTargetFence(targetId, operationId, confirmed) {
+  if (confirmed !== true) throw new Error("Explicit user confirmation after inspecting the affected document is required.");
+  const session = connectedSession(targetId);
+  const fence = targetFences.get(session.clientId);
+  if (!fence || fence.operationId !== operationId) throw new Error("No matching uncertain operation exists on this target.");
+  if (session.sessionId === fence.sessionId) throw new Error("This runtime may still be executing. Reload the plugin and inspect the affected document before acknowledging recovery.");
+  targetFences.delete(session.clientId);
+  pumpTargetLease(session);
+  return { acknowledged: true, targetId, operationId, outcome: "unknown", instruction: "Re-read affected document state before new edits. The old operation was not replayed." };
+}
+function checkTargetLease(session, leaseId) {
+  const fence = targetFences.get(session.clientId);
+  if (fence) throw new Error(`Target has an uncertain dispatched operation ${fence.operationId}. Its execution fence remains until completion or a reloaded plugin plus explicit inspection acknowledgement; no new command was sent.`);
+  if (session.lease && session.lease.id !== leaseId) throw new Error("The target is reserved by another logical tool call. Wait for its lease; no command was sent.");
+  if (leaseId && session.lease?.id !== leaseId) throw new Error("The target lease expired. Re-read its state before retrying; no command was sent.");
+}
+function pumpTargetLease(session) {
+  if (targetFences.has(session.clientId) || session.lease || session.pending.size > 0 || !session.leaseWaiters?.length || !sessions.has(session.sessionId)) return;
+  const waiter = session.leaseWaiters.shift();
+  clearTimeout(waiter.timer);
+  const lease = { id: randomUUID(), timer: null };
+  session.lease = lease;
+  lease.timer = setTimeout(() => releaseTargetLease(session, lease.id), leaseDurationMs);
+  lease.timer.unref?.();
+  waiter.resolve({ leaseId: lease.id, targetId: session.clientId, sessionId: session.sessionId, expiresInMs: leaseDurationMs });
+}
+function acquireTargetLease(targetId, sessionId) {
+  const session = connectedSession(targetId, sessionId);
+  if (targetFences.has(session.clientId)) throw new Error(`Target has an uncertain operation ${targetFences.get(session.clientId).operationId}. Inspect operation status and the document before recovery; no command was sent.`);
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, timer: null };
+    waiter.timer = setTimeout(() => {
+      const i = session.leaseWaiters.indexOf(waiter);
+      if (i !== -1) session.leaseWaiters.splice(i, 1);
+      reject(new Error("The target is busy. No command was sent; retry after its current operation completes."));
+    }, 6e4);
+    session.leaseWaiters.push(waiter);
+    pumpTargetLease(session);
+  });
+}
+function releaseTargetLease(session, leaseId) {
+  if (session.lease?.id !== leaseId) return false;
+  clearTimeout(session.lease.timer);
+  session.lease = null;
+  pumpTargetLease(session);
+  return true;
+}
+function renewTargetLease(session, leaseId) {
+  checkTargetLease(session, leaseId);
+  if (!leaseId) throw new Error("A lease ID is required.");
+  clearTimeout(session.lease.timer);
+  session.lease.timer = setTimeout(() => releaseTargetLease(session, leaseId), leaseDurationMs);
+  session.lease.timer.unref?.();
+  return { ok: true };
 }
 var statusPage = `<!doctype html>
 <html lang="en">
@@ -31421,6 +31602,7 @@ var statusPage = `<!doctype html>
         <dt>Bridge</dt><dd id="bridge">\u2014</dd>
         <dt>Figma page</dt><dd id="page">\u2014</dd>
         <dt>Plugin</dt><dd id="plugin">\u2014</dd>
+        <dt>Operation</dt><dd id="operation">\u2014</dd>
         <dt>Last seen</dt><dd id="seen">\u2014</dd>
       </dl>
       <p>Open the Local MCP Bridge development plugin in the target Figma Desktop file and leave its panel open. This page refreshes automatically.</p>
@@ -31437,6 +31619,8 @@ var statusPage = `<!doctype html>
           set('bridge', 'v' + data.bridge.version + ' on ' + data.bridge.host + ':' + data.bridge.port);
           set('page', data.plugin?.pageName);
           set('plugin', data.plugin?.pluginVersion ? 'v' + data.plugin.pluginVersion : null);
+          const operation = data.plugin?.activeOperations?.[0];
+          set('operation', operation ? operation.progress.message + ' (' + operation.progress.percent + '%) \u2014 ' + operation.operationId : null);
           set('seen', data.plugin?.lastSeenAt ? new Date(data.plugin.lastSeenAt).toLocaleTimeString() : null);
         } catch {
           set('label', 'Bridge unavailable');
@@ -31446,6 +31630,154 @@ var statusPage = `<!doctype html>
     </script>
   </body>
 </html>`;
+function cleanOperations(now = Date.now()) {
+  if (operations.size > 256) {
+    for (const [id, operation] of operations) {
+      if (operations.size <= 256) break;
+      if (["succeeded", "failed", "unknown"].includes(operation.state)) operations.delete(id);
+    }
+  }
+  for (const [operationId, operation] of operations) {
+    const terminal = ["succeeded", "failed", "unknown"].includes(operation.state);
+    if (terminal && now - operation.updatedAt > operationRetentionMs) operations.delete(operationId);
+  }
+}
+function operationErrorMessage(error51) {
+  return error51 instanceof Error && error51.message ? error51.message : String(error51);
+}
+function operationSnapshot(operation, includeResult = true) {
+  return {
+    operationId: operation.id,
+    targetId: operation.targetId,
+    name: operation.name,
+    state: operation.state,
+    createdAt: new Date(operation.createdAt).toISOString(),
+    updatedAt: new Date(operation.updatedAt).toISOString(),
+    startedAt: operation.startedAt ? new Date(operation.startedAt).toISOString() : null,
+    completedAt: operation.completedAt ? new Date(operation.completedAt).toISOString() : null,
+    progress: operation.progress,
+    ...operation.lateCompletionReceivedAt ? { lateCompletionReceivedAt: new Date(operation.lateCompletionReceivedAt).toISOString() } : {},
+    ...operation.error ? { error: operation.error } : {},
+    ...includeResult && operation.state === "succeeded" ? { result: operation.result } : {}
+  };
+}
+function getOperation(operationId) {
+  cleanOperations();
+  const operation = operations.get(operationId);
+  if (!operation) throw new Error(`No tracked Figma operation exists with ID ${operationId}. It may have expired after one hour.`);
+  return operation;
+}
+function setOperationProgress(operation, value) {
+  if (!operation || ["succeeded", "failed", "unknown"].includes(operation.state)) return;
+  const total = Number.isFinite(value?.total) && value.total > 0 ? value.total : 100;
+  const current = Number.isFinite(value?.current) ? Math.max(0, Math.min(total, value.current)) : 0;
+  const percent = Number.isFinite(value?.percent) ? Math.max(0, Math.min(100, value.percent)) : Math.round(current / total * 100);
+  operation.state = "running";
+  operation.startedAt ??= Date.now();
+  operation.updatedAt = Date.now();
+  operation.progress = {
+    phase: cleanString(value?.phase, 80) ?? "running",
+    message: cleanString(value?.message, 500) ?? "Figma is processing the operation.",
+    current,
+    total,
+    percent
+  };
+}
+function settleOperation(operation, state, value) {
+  if (!operation || ["succeeded", "failed", "unknown"].includes(operation.state)) return;
+  operation.state = state;
+  operation.updatedAt = Date.now();
+  operation.completedAt = Date.now();
+  operation.progress = {
+    phase: state,
+    message: state === "succeeded" ? "Operation complete." : state === "unknown" ? "Operation outcome is unknown." : "Operation failed.",
+    current: state === "succeeded" ? 100 : operation.progress.current,
+    total: 100,
+    percent: state === "succeeded" ? 100 : operation.progress.percent
+  };
+  if (state === "succeeded") {
+    operation.result = value;
+    operation.resolve(value);
+  } else {
+    operation.error = operationErrorMessage(value);
+    operation.reject(value instanceof Error ? value : new Error(operation.error));
+  }
+}
+function createTrackedOperation(session, name, input, requestedId) {
+  cleanOperations();
+  if (requestedId !== void 0 && (typeof requestedId !== "string" || !requestedId.trim() || requestedId.length > 200)) throw new Error("A valid operation ID is required.");
+  const operationId = requestedId ?? randomUUID();
+  const fingerprint = JSON.stringify(input);
+  const existing = operations.get(operationId);
+  if (existing) {
+    if (existing.targetId !== session.clientId || existing.name !== name || existing.inputFingerprint !== fingerprint) throw new Error(`Operation ID ${operationId} is already assigned to a different request.`);
+    return { operation: existing, created: false };
+  }
+  let resolve;
+  let reject;
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  completion.catch(() => {
+  });
+  const now = Date.now();
+  const operation = {
+    id: operationId,
+    targetId: session.clientId,
+    sessionId: session.sessionId,
+    name,
+    inputFingerprint: fingerprint,
+    requestedElementCount: Array.isArray(input.elements) ? input.elements.length : null,
+    requiredImageCount: (input.elements ?? []).filter((element) => element.imageRequired || element.imageSourceNodeId).length,
+    state: "queued",
+    createdAt: now,
+    updatedAt: now,
+    startedAt: null,
+    completedAt: null,
+    progress: { phase: "queued", message: "Waiting for the Figma plugin.", current: 0, total: 100, percent: 0 },
+    result: null,
+    error: null,
+    completion,
+    resolve,
+    reject
+  };
+  const command = { id: operationId, operationId, targetId: session.clientId, name, input };
+  const timeout = setTimeout(() => {
+    session.pending.delete(operationId);
+    const queuedIndex = session.queue.findIndex((queued) => queued.id === operationId);
+    if (queuedIndex !== -1) session.queue.splice(queuedIndex, 1);
+    const error51 = new Error(queuedIndex !== -1 ? `Tracked Figma operation ${operationId} was never dispatched and expired.` : `Tracked Figma operation ${operationId} exceeded its 30-minute safety limit. Its final outcome is unknown; inspect the document before retrying.`);
+    if (queuedIndex === -1) fenceTarget(session, operationId, error51.message);
+    settleOperation(operation, queuedIndex === -1 ? "unknown" : "failed", error51);
+    pumpTargetLease(session);
+  }, operationHardTimeoutMs);
+  operations.set(operationId, operation);
+  session.pending.set(operationId, { operation, timeout });
+  session.queue.push(command);
+  completePoll(session);
+  return { operation, created: true };
+}
+async function waitForOperation(operation, timeoutMs) {
+  if (operation.state === "succeeded") return operation.result;
+  if (["failed", "unknown"].includes(operation.state)) throw new Error(operation.error);
+  let timeout;
+  try {
+    return await Promise.race([
+      operation.completion,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          const error51 = new Error(`Figma operation ${operation.id} is still ${operation.state} after ${Math.round(timeoutMs / 1e3)} seconds. Call figma_operation_status with this operation ID before retrying.`);
+          error51.code = "OPERATION_STILL_RUNNING";
+          error51.operationId = operation.id;
+          reject(error51);
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 function completePoll(session) {
   if (!session.poll) return;
   const command = dequeuePendingCommand(session);
@@ -31458,15 +31790,21 @@ function completePoll(session) {
 function dequeuePendingCommand(session) {
   while (session.queue.length > 0) {
     const command = session.queue.shift();
-    if (session.pending.has(command.id)) return command;
+    if (session.pending.has(command.id)) {
+      session.pending.get(command.id).dispatched = true;
+      const operation = operations.get(command.operationId);
+      if (operation) setOperationProgress(operation, { phase: "dispatched", message: "Sent to the Figma plugin.", current: 1, total: 100, percent: 1 });
+      return command;
+    }
   }
   return null;
 }
 function addSession(body) {
   cleanReplacedSessions();
   for (const prior of sessions.values()) {
-    rejectSession(prior, "A newer Figma plugin connection replaced this session.", 409, true);
+    if (prior.clientId === body.clientId) rejectSession(prior, "A newer Figma plugin connection replaced this session.", 409, true);
   }
+  if (sessions.has(body.sessionId)) throw new Error("This session ID belongs to another plugin runtime.");
   const now = Date.now();
   const session = {
     sessionId: body.sessionId,
@@ -31476,7 +31814,9 @@ function addSession(body) {
     info: cleanSessionInfo(body.info),
     queue: [],
     pending: /* @__PURE__ */ new Map(),
-    poll: null
+    poll: null,
+    lease: null,
+    leaseWaiters: []
   };
   sessions.set(body.sessionId, session);
   return session;
@@ -31507,10 +31847,29 @@ var bridge = http.createServer(async (request, response) => {
   if (!isAllowedBrowserOrigin(origin)) return json2(response, 403, { error: "Browser origin is not permitted by this local bridge." });
   if (origin) response.bridgeCorsOrigin = origin;
   if (request.method === "OPTIONS") return json2(response, 204);
-  const url2 = new URL(request.url, `http://${host}:${port}`);
+  const url2 = new URL(request.url, `${bridgeBaseUrl}:${port}`);
   try {
     if (request.method === "GET" && url2.pathname === "/") return html(response, 200, statusPage);
     if (request.method === "GET" && url2.pathname === "/v1/status") return json2(response, 200, bridgeStatusSnapshot());
+    if (apiDisabled && (url2.pathname.startsWith("/v1/figma-rest/") || ["/v1/api-credentials/save", "/v1/api-credentials/test", "/v1/api-credentials/clear"].includes(url2.pathname))) {
+      return json2(response, 403, { error: "Figma API and comments are disabled for this local bridge." });
+    }
+    if (request.method === "POST" && url2.pathname === "/v1/mcp-acknowledge-uncertain") {
+      if (origin) return json2(response, 403, { error: "Internal bridge route." });
+      if (!isJsonRequest(request)) return json2(response, 415, { error: "JSON required." });
+      const body = await readJson(request);
+      return json2(response, 200, acknowledgeTargetFence(body.targetId, body.operationId, body.confirmed));
+    }
+    if (request.method === "GET" && url2.pathname === "/v1/targets") return json2(response, 200, { targets: discoverableTargets() });
+    if (request.method === "POST" && ["/v1/lease/acquire", "/v1/lease/renew", "/v1/lease/release"].includes(url2.pathname)) {
+      if (origin) return json2(response, 403, { error: "Internal bridge route." });
+      if (!isJsonRequest(request)) return json2(response, 415, { error: "JSON required." });
+      const body = await readJson(request);
+      if (typeof body.targetId !== "string" || body.targetId.length > 200) throw new Error("A target ID is required.");
+      if (url2.pathname === "/v1/lease/acquire") return json2(response, 200, await acquireTargetLease(body.targetId, body.sessionId));
+      const session = connectedSession(body.targetId, body.sessionId);
+      return json2(response, 200, url2.pathname.endsWith("/renew") ? renewTargetLease(session, body.leaseId) : { released: releaseTargetLease(session, body.leaseId) });
+    }
     if (request.method === "GET" && url2.pathname === "/v1/api-credentials/status") {
       authorizePluginSettings(url2.searchParams.get("sessionId"), url2.searchParams.get("clientId"));
       return json2(response, 200, await ownerApiCredentialStatus());
@@ -31551,7 +31910,27 @@ var bridge = http.createServer(async (request, response) => {
       if (!body.input || typeof body.input !== "object" || Array.isArray(body.input)) return json2(response, 400, { error: "Command input must be an object." });
       const timeoutMs = body.timeoutMs === void 0 ? 3e4 : body.timeoutMs;
       if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1e3 || timeoutMs > 6e5) return json2(response, 400, { error: "timeoutMs must be between 1000 and 600000." });
-      return json2(response, 200, { result: await sendLocalCommand(body.name, body.input, timeoutMs) });
+      const session = connectedSession(body.targetId, body.sessionId);
+      checkTargetLease(session, body.leaseId);
+      if (body.tracked) {
+        const result = await sendTrackedLocalCommand(body.name, body.input, {
+          operationId: body.operationId,
+          targetId: session.clientId,
+          sessionId: session.sessionId,
+          leaseId: body.leaseId,
+          waitForCompletion: body.waitForCompletion !== false,
+          timeoutMs
+        });
+        return json2(response, 200, { result });
+      }
+      return json2(response, 200, { result: await sendLocalCommand(body.name, body.input, timeoutMs, { targetId: session.clientId, sessionId: session.sessionId, leaseId: body.leaseId }) });
+    }
+    if (request.method === "POST" && url2.pathname === "/v1/mcp-operation-status") {
+      if (origin) return json2(response, 403, { error: "Internal bridge route." });
+      if (!isJsonRequest(request)) return json2(response, 415, { error: "JSON required." });
+      const body = await readJson(request);
+      if (typeof body.operationId !== "string" || body.operationId.length > 200) return json2(response, 400, { error: "A valid operation ID is required." });
+      return json2(response, 200, { operation: operationSnapshot(getOperation(body.operationId), body.includeResult !== false) });
     }
     if (request.method === "POST" && url2.pathname === "/v1/connect") {
       const body = await readJson(request);
@@ -31605,6 +31984,19 @@ var bridge = http.createServer(async (request, response) => {
       updateSession(session, body.info);
       return json2(response, 204);
     }
+    if (request.method === "POST" && url2.pathname === "/v1/progress") {
+      const body = await readJson(request);
+      const session = getSession(body.sessionId);
+      if (!session) {
+        const replaced = sessionWasReplaced(body.sessionId);
+        return json2(response, replaced ? 409 : 401, { error: replaced ? "This plugin session was replaced by a newer Figma connection." : "Unknown bridge session." });
+      }
+      updateSession(session, body.info);
+      const pending = session.pending.get(body.id);
+      if (!pending?.operation) return json2(response, 404, { error: "No matching tracked operation." });
+      setOperationProgress(pending.operation, body.progress);
+      return json2(response, 204);
+    }
     if (request.method === "POST" && url2.pathname === "/v1/result") {
       const body = await readJson(request);
       const session = getSession(body.sessionId);
@@ -31614,48 +32006,85 @@ var bridge = http.createServer(async (request, response) => {
       }
       updateSession(session, body.info);
       const pending = session.pending.get(body.id);
-      if (!pending) return json2(response, 404, { error: "No matching command." });
+      if (!pending) {
+        const fence = targetFences.get(session.clientId);
+        if (fence?.operationId === body.id && fence.sessionId === session.sessionId) {
+          targetFences.delete(session.clientId);
+          const operation = operations.get(body.id);
+          if (operation) operation.lateCompletionReceivedAt = Date.now();
+          pumpTargetLease(session);
+          return json2(response, 204);
+        }
+        return json2(response, 404, { error: "No matching command." });
+      }
       session.pending.delete(body.id);
       clearTimeout(pending.timeout);
-      if (body.ok) pending.resolve(body.result);
+      if (pending.operation) {
+        if (body.ok) {
+          try {
+            const verified = pending.operation.name === "composeFrame" ? requireCompositionResult(body.result, pending.operation.requestedElementCount, pending.operation.requiredImageCount) : body.result;
+            const result = pending.operation.name === "composeFrame" ? await localizeBatchExports(verified) : verified;
+            settleOperation(pending.operation, "succeeded", result);
+          } catch (error51) {
+            error51.message += " The plugin reported completion but verification failed. Inspect the affected Figma document before retrying.";
+            settleOperation(pending.operation, "unknown", error51);
+          }
+        } else {
+          settleOperation(pending.operation, "failed", new Error(typeof body.error === "string" ? body.error : "The Figma plugin rejected the command."));
+        }
+      } else if (body.ok) pending.resolve(body.result);
       else pending.reject(new Error(typeof body.error === "string" ? body.error : "The Figma plugin rejected the command."));
+      pumpTargetLease(session);
       return json2(response, 204);
     }
     return json2(response, 404, { error: "Not found." });
   } catch (error51) {
-    return json2(response, 400, { error: error51 instanceof Error ? error51.message : String(error51) });
+    return json2(response, 400, {
+      error: error51 instanceof Error ? error51.message : String(error51),
+      ...error51?.code ? { code: error51.code } : {},
+      ...error51?.operationId ? { operationId: error51.operationId } : {}
+    });
   }
 });
-function sendLocalCommand(name, input, timeoutMs = 3e4) {
-  const liveSessions = activeSessions();
-  if (liveSessions.length === 0) {
-    throw new Error("No Figma plugin is connected. Open Local MCP Bridge in the target Figma file and leave its status panel open; it connects automatically.");
-  }
-  if (liveSessions.length > 1) {
-    throw new Error("More than one Figma plugin is connected. Keep only the target file's bridge plugin connected.");
-  }
-  const session = liveSessions[0];
+function sendLocalCommand(name, input, timeoutMs = 3e4, options = {}) {
+  const session = connectedSession(options.targetId, options.sessionId);
+  checkTargetLease(session, options.leaseId);
   const id = randomUUID();
-  const command = { id, name, input };
+  const command = { id, targetId: session.clientId, name, input };
   const result = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       session.pending.delete(id);
       const queuedIndex = session.queue.findIndex((queued) => queued.id === id);
       if (queuedIndex !== -1) session.queue.splice(queuedIndex, 1);
       const outcome = queuedIndex !== -1 ? "The command was not dispatched and has been removed from the queue. Confirm the bridge plugin is still open and connected." : "The command was dispatched, so its outcome is unknown. Re-read the affected Figma state before retrying.";
+      if (queuedIndex === -1) fenceTarget(session, id, outcome);
       reject(new Error(`Figma did not respond within ${Math.round(timeoutMs / 1e3)} seconds. ${outcome}`));
+      pumpTargetLease(session);
     }, timeoutMs);
-    session.pending.set(id, { resolve, reject, timeout });
+    session.pending.set(id, { id, resolve, reject, timeout, dispatched: false });
   });
   session.queue.push(command);
   completePoll(session);
   return result;
 }
+async function sendTrackedLocalCommand(name, input, options = {}) {
+  const session = connectedSession(options.targetId, options.sessionId);
+  checkTargetLease(session, options.leaseId);
+  if (name === "composeFrame" && !session.info?.capabilities?.includes(compositionImageCapability)) {
+    const error51 = new Error("The connected Figma plugin does not support tracked composition image verification. Reload the updated Local MCP Bridge development plugin in Figma before composing.");
+    error51.code = "PLUGIN_UPDATE_REQUIRED";
+    throw error51;
+  }
+  const { operation } = createTrackedOperation(session, name, input, options.operationId);
+  if (options.waitForCompletion === false) return operationSnapshot(operation, false);
+  const result = await waitForOperation(operation, options.timeoutMs ?? 3e5);
+  return result && typeof result === "object" && !Array.isArray(result) ? { operationId: operation.id, ...result } : { operationId: operation.id, result };
+}
 async function ownerRequest(pathname, options = {}, timeoutMs = 5e3) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`http://${host}:${port}${pathname}`, { ...options, signal: controller.signal });
+    const response = await fetch(`${bridgeBaseUrl}:${port}${pathname}`, { ...options, signal: controller.signal });
     const text = await response.text();
     let data = {};
     if (text) {
@@ -31666,7 +32095,10 @@ async function ownerRequest(pathname, options = {}, timeoutMs = 5e3) {
       }
     }
     if (!response.ok) {
-      throw new Error(typeof data.error === "string" ? data.error : `Bridge owner returned HTTP ${response.status} for ${pathname}.`);
+      const error51 = new Error(typeof data.error === "string" ? data.error : `Bridge owner returned HTTP ${response.status} for ${pathname}.`);
+      if (data.code) error51.code = data.code;
+      if (data.operationId) error51.operationId = data.operationId;
+      throw error51;
     }
     return data;
   } catch (error51) {
@@ -31694,15 +32126,67 @@ async function bridgeStatusForMcp() {
     }
   };
 }
+function commandRouting() {
+  const context = targetContext.getStore();
+  if (context?.leaseLost) throw new Error("The target lease was lost. Inspect operation status before retrying.");
+  return context ? { targetId: context.targetId, sessionId: context.sessionId, leaseId: context.leaseId } : { targetId: defaultTargetId };
+}
 async function sendCommand(name, input, timeoutMs = 3e4) {
+  const context = targetContext.getStore();
+  if (context) {
+    const index = context.commandIndex++;
+    const operationId = index === 0 ? context.operationId : `${context.operationId}:${index + 1}`;
+    const result = await sendTrackedCommand(name, input, { operationId, timeoutMs, ...commandRouting() });
+    return result;
+  }
   await initialBridgeRole;
-  if (bridgeRole === "owner") return sendLocalCommand(name, input, timeoutMs);
+  const routing = commandRouting();
+  if (bridgeRole === "owner") return sendLocalCommand(name, input, timeoutMs, routing);
   const response = await ownerRequest("/v1/mcp-command", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, input, timeoutMs })
+    body: JSON.stringify({ name, input, timeoutMs, ...routing })
   }, timeoutMs + 5e3);
   return response.result;
+}
+async function sendTrackedCommand(name, input, options = {}) {
+  const context = targetContext.getStore();
+  options = { ...commandRouting(), ...options };
+  const operationId = options.operationId ?? context?.operationId ?? randomUUID();
+  try {
+    await initialBridgeRole;
+    if (bridgeRole === "owner") return await sendTrackedLocalCommand(name, input, { ...options, operationId });
+    await requireTrackedOwner();
+    const timeoutMs = options.timeoutMs ?? 3e5;
+    const response = await ownerRequest("/v1/mcp-command", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, input, timeoutMs, tracked: true, operationId, waitForCompletion: options.waitForCompletion !== false, targetId: options.targetId, sessionId: options.sessionId, leaseId: options.leaseId })
+    }, options.waitForCompletion === false ? 1e4 : timeoutMs + 5e3);
+    return response.result;
+  } catch (error51) {
+    error51.operationId = operationId;
+    throw error51;
+  }
+}
+async function operationStatusForMcp(operationId, includeResult) {
+  await initialBridgeRole;
+  if (bridgeRole === "owner") return operationSnapshot(getOperation(operationId), includeResult);
+  await requireTrackedOwner();
+  const response = await ownerRequest("/v1/mcp-operation-status", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ operationId, includeResult })
+  });
+  return response.operation;
+}
+async function requireTrackedOwner() {
+  const status = await ownerRequest("/v1/status");
+  if (!status.bridge?.capabilities?.includes(trackedCompositionCapability)) {
+    const error51 = new Error("The running bridge owner does not support tracked compositions. Restart the MCP bridge processes using the updated build before composing; no command was sent.");
+    error51.code = "BRIDGE_UPDATE_REQUIRED";
+    throw error51;
+  }
 }
 function output(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -31740,15 +32224,135 @@ function imageMimeType(bytes) {
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
   return null;
 }
+var maxImageBytes = 25 * 1024 * 1024;
+function ipv4Number(address) {
+  if (isIP(address) !== 4) return null;
+  return address.split(".").reduce((value, octet) => (value << 8 | Number(octet)) >>> 0, 0);
+}
+function isPublicAddress(address) {
+  const family = isIP(address);
+  if (family === 4) {
+    const value = ipv4Number(address);
+    const inSubnet = (subnet, prefix) => {
+      const base = ipv4Number(subnet);
+      const mask = prefix === 0 ? 0 : 4294967295 << 32 - prefix >>> 0;
+      return (value & mask) === (base & mask);
+    };
+    const nonPublic = [
+      ["0.0.0.0", 8],
+      ["10.0.0.0", 8],
+      ["100.64.0.0", 10],
+      ["127.0.0.0", 8],
+      ["169.254.0.0", 16],
+      ["172.16.0.0", 12],
+      ["192.0.0.0", 24],
+      ["192.0.2.0", 24],
+      ["192.88.99.0", 24],
+      ["192.168.0.0", 16],
+      ["198.18.0.0", 15],
+      ["198.51.100.0", 24],
+      ["203.0.113.0", 24],
+      ["224.0.0.0", 4],
+      ["240.0.0.0", 4]
+    ];
+    return !nonPublic.some(([subnet, prefix]) => inSubnet(subnet, prefix));
+  }
+  if (family === 6) {
+    const normalized = address.toLowerCase();
+    if (!/^2[0-9a-f]{3}:/i.test(normalized)) return false;
+    if (normalized.startsWith("2001:db8:") || normalized.startsWith("2001:10:") || normalized.startsWith("2001:20:")) return false;
+    return true;
+  }
+  return false;
+}
+async function requestRemoteImage(url2, address) {
+  return new Promise((resolve, reject) => {
+    const request = https.request(url2, {
+      method: "GET",
+      headers: {
+        accept: "image/png,image/jpeg,image/gif,image/webp",
+        "user-agent": "Figma Local Bridge"
+      },
+      lookup: (_hostname, options, callback) => options?.all ? callback(null, [address]) : callback(null, address.address, address.family),
+      servername: url2.hostname
+    }, (response) => {
+      const status = response.statusCode ?? 0;
+      if ([301, 302, 303, 307, 308].includes(status)) {
+        const location = response.headers.location;
+        response.resume();
+        resolve({ redirect: location });
+        return;
+      }
+      if (status !== 200) {
+        response.resume();
+        reject(new Error(`Image URL returned HTTP ${status}.`));
+        return;
+      }
+      const declaredLength = Number(response.headers["content-length"]);
+      if (Number.isFinite(declaredLength) && declaredLength > maxImageBytes) {
+        response.resume();
+        reject(new Error("Remote image exceeds the 25 MB safety limit."));
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > maxImageBytes) {
+          response.destroy(new Error("Remote image exceeds the 25 MB safety limit."));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => resolve({ bytes: Buffer.concat(chunks) }));
+      response.on("error", reject);
+    });
+    request.setTimeout(15e3, () => request.destroy(new Error("Remote image request timed out.")));
+    request.on("error", reject);
+    request.end();
+  });
+}
+async function readRemoteImage(inputUrl) {
+  let url2;
+  try {
+    url2 = new URL(inputUrl);
+  } catch {
+    throw new Error("Image URL must be a valid HTTPS URL.");
+  }
+  for (let redirects = 0; redirects <= 5; redirects += 1) {
+    if (url2.protocol !== "https:" || url2.username || url2.password) throw new Error("Image URL must use HTTPS and must not include embedded credentials.");
+    const addresses = await lookup(url2.hostname, { all: true, verbatim: true });
+    if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+      throw new Error("Image URL must resolve only to public IP addresses.");
+    }
+    const response = await requestRemoteImage(url2, addresses[0]);
+    if (response.bytes) return { bytes: response.bytes, sourceUrl: `${url2.origin}${url2.pathname}` };
+    if (!response.redirect || redirects === 5) throw new Error("Image URL redirected too many times or omitted its destination.");
+    url2 = new URL(response.redirect, url2);
+  }
+  throw new Error("Image URL redirected too many times.");
+}
 async function localImageInput(input) {
-  if (!isAbsolute(input.path)) throw new Error("Local image path must be absolute.");
-  const bytes = await readFile2(input.path);
-  if (bytes.length === 0) throw new Error("The approved local image is empty.");
-  if (bytes.length > 25 * 1024 * 1024) throw new Error("The approved local image exceeds the 25 MB safety limit.");
+  const hasPath = typeof input.path === "string" && input.path.trim().length > 0;
+  const hasUrl = typeof input.url === "string" && input.url.trim().length > 0;
+  if (hasPath === hasUrl) throw new Error("Provide exactly one absolute local path or HTTPS image URL.");
+  let bytes;
+  let sourcePath;
+  if (hasPath) {
+    if (!isAbsolute(input.path)) throw new Error("Local image path must be absolute.");
+    bytes = await readFile2(input.path);
+    sourcePath = input.path;
+    if (bytes.length > maxImageBytes) throw new Error("The approved local image exceeds the 25 MB safety limit.");
+  } else {
+    const remote = await readRemoteImage(input.url.trim());
+    bytes = remote.bytes;
+    sourcePath = remote.sourceUrl;
+  }
+  if (bytes.length === 0) throw new Error("The approved image is empty.");
   const mimeType = imageMimeType(bytes);
-  if (!mimeType) throw new Error("Local image must be a valid PNG, JPEG, GIF, or WebP file.");
-  const { path, ...rest } = input;
-  return { ...rest, sourcePath: path, mimeType, imageBase64: bytes.toString("base64") };
+  if (!mimeType) throw new Error("Image must be a valid PNG, JPEG, GIF, or WebP file.");
+  const { path, url: url2, ...rest } = input;
+  return { ...rest, sourcePath, mimeType, imageBase64: bytes.toString("base64") };
 }
 async function localizeBatchExports(data) {
   const exports = [];
@@ -31766,11 +32370,12 @@ async function localizeBatchExports(data) {
   return {
     ...data,
     exports,
-    verificationComplete: data.audits?.every((item) => !item.error) !== false && exports.every((item) => !item.error)
+    verificationComplete: data.verificationComplete !== false && data.audits?.every((item) => !item.error && item.result?.complete !== false) !== false && (data.imageAudit?.warningCount ?? 0) === 0 && exports.every((item) => !item.error)
   };
 }
 function failure(error51) {
-  return { content: [{ type: "text", text: error51 instanceof Error ? error51.message : String(error51) }], isError: true };
+  const message = error51 instanceof Error ? error51.message : String(error51);
+  return { content: [{ type: "text", text: error51?.operationId ? JSON.stringify({ error: message, operationId: error51.operationId, code: error51.code }) : message }], isError: true };
 }
 function structuredFailure(code, error51, details = {}) {
   return {
@@ -31778,12 +32383,18 @@ function structuredFailure(code, error51, details = {}) {
     isError: true
   };
 }
-function requireCompositionResult(data, requestedElementCount) {
+function requireCompositionResult(data, requestedElementCount, requiredImageCount) {
   const createdCount = Array.isArray(data?.createdNodeIds) ? data.createdNodeIds.length : 0;
   const elementCount = Array.isArray(data?.elements) ? data.elements.length : 0;
   if (!data?.frame?.id || createdCount !== requestedElementCount + 1 || elementCount !== requestedElementCount) {
     const error51 = new Error(`Figma returned an incomplete composition: expected one root frame and ${requestedElementCount} native elements, received ${createdCount} created node IDs and ${elementCount} element records.`);
     error51.code = "COMPOSITION_EMPTY_OR_INCOMPLETE";
+    throw error51;
+  }
+  const audit = data.imageAudit;
+  if (!audit || !Number.isSafeInteger(audit.requiredCount) || audit.requiredCount < 0 || !Number.isSafeInteger(audit.filledCount) || audit.filledCount < 0 || audit.filledCount > audit.requiredCount || !Number.isSafeInteger(audit.warningCount) || audit.warningCount < 0 || !Array.isArray(audit.warnings) || audit.warningCount !== audit.warnings.length || audit.warningCount !== audit.requiredCount - audit.filledCount || requiredImageCount !== void 0 && audit.requiredCount !== requiredImageCount || audit.warningCount > 0 && (data.verificationComplete !== false || data.archived)) {
+    const error51 = new Error("Figma returned missing or inconsistent required-image audit evidence.");
+    error51.code = "COMPOSITION_IMAGE_AUDIT_INVALID";
     throw error51;
   }
   return data;
@@ -31810,6 +32421,11 @@ var visualStyle = {
   clipsContent: external_exports.boolean().optional()
 };
 var readDetail = external_exports.enum(["summary", "full"]).default("summary");
+var auditBatchInput = {
+  maxTextNodes: external_exports.number().int().min(1).max(200).default(40).describe("Maximum text nodes measured in this batch."),
+  maxTraversalNodes: external_exports.number().int().min(1).max(4e3).default(400).describe("Maximum document nodes visited in this batch."),
+  timeBudgetMs: external_exports.number().int().min(1).max(3e3).default(1e3).describe("Cooperative time budget per batch; an individual Figma font/measurement operation cannot be interrupted.")
+};
 var textCase = external_exports.enum(["original", "upper", "lower", "title", "small-caps"]);
 var textStyleFields = {
   fontFamily: external_exports.string().trim().min(1).max(200).optional(),
@@ -31827,6 +32443,12 @@ var styledSpan = external_exports.object({
   ...textStyleFields
 }).refine((span) => span.end > span.start, "Styled span end must be greater than start.");
 var imageTransform = external_exports.array(external_exports.tuple([external_exports.number().finite(), external_exports.number().finite(), external_exports.number().finite()])).length(2);
+var composeImageFields = {
+  imageSourceNodeId: nodeId.optional().describe("Existing Figma node whose image fill should be copied directly into this composed element."),
+  imageScaleMode: external_exports.enum(["FILL", "FIT", "CROP", "TILE"]).optional(),
+  imageTransform: imageTransform.optional().describe("Optional Figma 2\xD73 crop transform; requires imageSourceNodeId and forces CROP mode."),
+  imageRequired: external_exports.boolean().default(false).describe("Mark this as a required image area. Verification remains incomplete if it has no image fill.")
+};
 var composeFrameElement = external_exports.discriminatedUnion("type", [
   external_exports.object({
     type: external_exports.literal("frame"),
@@ -31839,7 +32461,8 @@ var composeFrameElement = external_exports.discriminatedUnion("type", [
     layout: external_exports.enum(["none", "horizontal", "vertical"]).default("none"),
     itemSpacing: external_exports.number().finite().min(0).max(1e3).default(0),
     padding: external_exports.number().finite().min(0).max(1e3).default(0),
-    ...visualStyle
+    ...visualStyle,
+    ...composeImageFields
   }),
   external_exports.object({
     type: external_exports.literal("rectangle"),
@@ -31849,7 +32472,8 @@ var composeFrameElement = external_exports.discriminatedUnion("type", [
     width: external_exports.number().finite().min(1).max(1e4),
     height: external_exports.number().finite().min(1).max(1e4),
     ...position,
-    ...visualStyle
+    ...visualStyle,
+    ...composeImageFields
   }),
   external_exports.object({
     type: external_exports.literal("text"),
@@ -32161,9 +32785,19 @@ function validateFigmaAccessToken(value) {
   return value;
 }
 async function ownerCredentialToken() {
+  if (apiDisabled) throw new Error("Figma API and comments are disabled for this local bridge.");
   return environmentFigmaAccessToken || await credentialStore.get();
 }
 async function ownerApiCredentialStatus() {
+  if (apiDisabled) return {
+    configured: false,
+    disabled: true,
+    source: null,
+    storage: { backend: "disabled", label: "Disabled by local-only configuration", persisted: false, managedExternally: true, warning: null },
+    defaultFileKey: null,
+    defaultFileKeySource: null,
+    capabilities: { commentsRead: "unavailable" }
+  };
   const settings = await readApiSettings();
   if (environmentFigmaAccessToken) {
     return {
@@ -32263,6 +32897,7 @@ async function requireCommentFileKey(input) {
   return configuration;
 }
 async function ownerFigmaCommentsRequest(path, options = {}) {
+  if (apiDisabled) throw new Error("Figma API and comments are disabled for this local bridge.");
   const token = await requireFigmaCommentToken();
   let response;
   try {
@@ -32357,41 +32992,142 @@ async function deleteComment(input) {
 var workflowInstructions = [
   "Use this server with the inspect-first $figma-local-workflow skill when available.",
   "For best first-pass results, always follow this order:",
-  "1. figma_bridge_status \u2014 confirm exactly one Figma Desktop plugin is connected.",
+  "1. figma_list_connections \u2014 choose a runtime targetId, stableTargetRef (file:<key>), or exact namedTargetRef (name:<saved label/documentName>) for each canvas call. Switching is per-call; never guess from focus or page names, fuzzy-match names, or choose among duplicate names.",
   "2. figma_get_user_preferences \u2014 load confirmed per-user design-system, component, style, token, typography, layout and copy preferences before choosing assets.",
   "3. figma_list_design_system_assets and figma_list_artboards \u2014 discover verified components/styles and clean artboard IDs; never guess IDs or redraw an available appropriate component.",
   "4. figma_read_frame_content or figma_read_spread_content \u2014 read the relevant copy with hierarchy before editing.",
   "When review feedback matters, call figma_comment_status and figma_list_comments before editing. If access is unavailable, direct the user to Figma API access in the connected plugin; never ask for a token in chat or a tool call. Canvas tools remain token-free.",
   "Use detail=summary for routine reads and overflow audits; request full only when hierarchy or hidden variants are needed.",
   "For source-to-Figma copy sync, use figma_read_copy for compact IDs/copy/bounds, diff outside Figma, then use figma_apply_copy_updates for narrow writes plus audit/export verification.",
-  "5. figma_export_frame_png \u2014 inspect each relevant artboard visually from its returned local path.",
+  "5. For layout, imagery or uncertain wrapping, inspect a targeted screenshot or figma_export_frame_png. For routine copy-only work, structured reads and overflow audits are sufficient; do not capture images by default.",
   "6. Analyse copy and layout together; call figma_audit_text_overflow when fit or clipping matters.",
   "Fast path after step 2: figma_prepare_review performs steps 3\u20135 for one to eight known artboards, writes their PNGs locally, and makes no edits.",
   "7. Only then edit identified nodes with the narrowest mutation tools.",
-  "8. Re-read, re-audit, and re-export affected artboards after editing.",
+  "8. Re-read and re-audit affected artboards after editing. Capture another visual only when the change needs visual verification.",
   "Prefer confirmed user choices, linked-system component instances, bound variables and named Figma styles\u2014in that order\u2014over detached copies, manually reconstructed components or raw visual values.",
   "When multiple systems or assets are equally plausible, call figma_resolve_design_choice. If it returns needsClarification=true, do not edit: ask the user to choose, then offer to save the answer with figma_set_user_preference.",
   "Only create, update, delete or revert a stored preference after an explicit user instruction or confirmation. Never silently learn a preference from one document.",
   "Before creating or replacing text, separate content from presentation. Author generated headings, labels and buttons in natural case; display uppercase, lowercase, title case or small caps with textCase or figma_set_text_case.",
   "Never pass all-caps characters merely to make text look uppercase. Preserve exact all-caps characters only when they are semantically intended, supplied as authoritative copy, or explicitly requested by the user.",
-  "For a page re-layout: inspect and export the current artboard, list page tokens or copy style from verified source nodes, compose the named replacement with figma_compose_frame, archive explicit previous sibling nodes only after the replacement succeeds, then inspect the returned audit and PNG.",
+  "For a page re-layout: inspect and export the current artboard, list page tokens or copy style from verified source nodes, then compose the named replacement. Use figma_start_composition plus figma_operation_status for a potentially slow board; use figma_compose_frame only when a blocking call is suitable.",
+  "Reuse approved existing image fills inside compositions with imageSourceNodeId. Mark necessary image areas imageRequired=true, inspect imageAudit, and never call the board complete or archive its predecessor while required images are missing.",
+  "If a tracked composition is interrupted or times out, call figma_operation_status with its operation ID before retrying. Reuse that ID to recover the same request; do not start a duplicate while it is queued, running, or has an unknown outcome.",
   "For a reference board or new canvas area: call figma_inspect_canvas_layout first, create a native SECTION with figma_create_section, and compose native frames inside it. Re-check the created node for collisions and use a targeted screenshot when visual overlap or adjacency matters.",
   "Never use figma_import_svg for UI layouts, panels, boards, or editable labels. Reserve it for approved logos, icons, and isolated vector artwork; create UI text in natural case and apply Figma textCase for visual casing.",
   "Treat COMPOSITION_EMPTY_OR_INCOMPLETE, any structured composition error, or a blank result as a hard stop. Do not fall back to SVG layout construction.",
   "Prefer figma_archive_nodes or figma_supersede_layout over deletion or opacity-zero superseded layers. Use approved local image paths only when the user placed that file in scope.",
   "Do not begin from arbitrary page traversal or the current selection when artboard discovery is available. Delete only a clearly stray, user-identified element; otherwise preserve it."
-].join("\n");
+].filter((instruction) => !apiDisabled || !/figma_comment_status|figma_list_comments|Figma API access/.test(instruction)).join("\n");
 var server = new McpServer(
   { name: "figma-local-bridge", version: bridgeVersion },
   { instructions: workflowInstructions }
 );
+var registerTool = server.registerTool.bind(server);
+server.registerTool = (name, config2, callback) => {
+  if (apiDisabled && ["figma_comment_status", "figma_list_comments", "figma_post_comment", "figma_delete_comment"].includes(name)) return void 0;
+  const canvas = /send(?:Tracked)?Command\(/.test(String(callback));
+  if (!canvas) return registerTool(name, config2, callback);
+  const fields = {
+    targetId: external_exports.string().trim().min(1).max(220).optional().describe("Per-call target: exact runtime ID, file:<key>, or name:<saved label/documentName> from figma_list_connections. A unique exact saved name also works. Never fuzzy-match or use a page name. Overrides only this call's per-proxy FIGMA_BRIDGE_TARGET default."),
+    operationId: external_exports.string().trim().min(1).max(150).optional().describe("Recovery key for this logical call. Reuse only with the same target and inputs; inspect unknown outcomes before retrying.")
+  };
+  const inputSchema = config2.inputSchema?.safeExtend ? config2.inputSchema.safeExtend(fields) : { ...config2.inputSchema, ...fields };
+  return registerTool(name, { ...config2, description: `${config2.description} Choose this call\u2019s targetId explicitly (runtime ID, file:<key>, or exact name:<saved name>) when switching files; ambiguous names are rejected.`, inputSchema }, async (input, extra) => {
+    let lease, renewTimer;
+    try {
+      const status = await bridgeStatusForMcp();
+      if (!Array.isArray(status.targets) || !status.bridge?.capabilities?.includes("multi-target-v1")) throw new Error("The running bridge owner needs the updated multi-target build. Restart the owner before using canvas tools; no command was sent.");
+      const requested = input.targetId ?? defaultTargetId;
+      const targets = status.targets.filter((target2) => target2.connected || target2.pendingCommandCount > 0);
+      const target = resolveConnection(targets, requested);
+      if (!target) throw new Error(requested ? `Figma target ${requested} is unavailable.` : "Choose an explicit targetId from figma_list_connections; no command was sent.");
+      const callOwner = async (action, body) => {
+        if (bridgeRole === "owner") {
+          if (action === "acquire") return acquireTargetLease(body.targetId, body.sessionId);
+          const session = connectedSession(body.targetId, body.sessionId);
+          return action === "renew" ? renewTargetLease(session, body.leaseId) : releaseTargetLease(session, body.leaseId);
+        }
+        return ownerRequest(`/v1/lease/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, action === "acquire" ? 65e3 : 5e3);
+      };
+      lease = await callOwner("acquire", { targetId: target.targetId, sessionId: target.sessionId });
+      const context = { ...lease, operationId: input.operationId ?? randomUUID(), commandIndex: 0 };
+      let renewing = false;
+      renewTimer = setInterval(async () => {
+        if (renewing) return;
+        renewing = true;
+        try {
+          await callOwner("renew", lease);
+        } catch {
+          context.leaseLost = true;
+        } finally {
+          renewing = false;
+        }
+      }, 5e3);
+      renewTimer.unref?.();
+      const { targetId, operationId, ...commandInput } = input;
+      if (name === "figma_compose_frame" || name === "figma_start_composition") commandInput.operationId = context.operationId;
+      return await targetContext.run(context, () => callback(commandInput, extra));
+    } catch (error51) {
+      return failure(error51);
+    } finally {
+      clearInterval(renewTimer);
+      if (lease) {
+        try {
+          if (bridgeRole === "owner") {
+            const session = sessions.get(lease.sessionId);
+            if (session) releaseTargetLease(session, lease.leaseId);
+          } else await ownerRequest("/v1/lease/release", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(lease) });
+        } catch {
+        }
+      }
+    }
+  });
+};
+registerTool("figma_list_connections", {
+  title: "List Figma connections",
+  description: "List operational local Figma connections with runtime targetId, stableTargetRef (file:<key>), namedTargetRefs (name:<saved label/documentName>), pages, heartbeat health, and activity. Use one of these refs on each canvas call to switch files; no global target changes. Saved names match exactly and duplicates require a unique runtime ID.",
+  inputSchema: {}
+}, async () => {
+  try {
+    const status = await bridgeStatusForMcp();
+    return output({ targets: status.targets.filter(isOperationalTarget) });
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+registerTool("figma_acknowledge_uncertain_operation", {
+  title: "Acknowledge inspected Figma recovery",
+  description: "Only after explicit user confirmation: acknowledge an uncertain operation after reloading the affected plugin and inspecting document state. Never use this to automatically retry unknown edits. Does not replay the old operation.",
+  inputSchema: { targetId: external_exports.string().trim().min(1).max(200), operationId: external_exports.string().trim().min(1).max(200), confirmed: external_exports.literal(true) }
+}, async (input) => {
+  try {
+    await initialBridgeRole;
+    return output(bridgeRole === "owner" ? acknowledgeTargetFence(input.targetId, input.operationId, input.confirmed) : await ownerRequest("/v1/mcp-acknowledge-uncertain", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
 server.registerTool("figma_bridge_status", {
   title: "Figma local bridge status",
-  description: "Check whether exactly one Figma local bridge plugin is connected, including bridge/plugin versions, current Figma page, selection count, last heartbeat, and in-flight command count.",
+  description: "List Figma local bridge plugin targets and check whether any is connected, including bridge/plugin versions, current Figma page, selection count, last heartbeat, and in-flight command count.",
   inputSchema: {}
 }, async () => {
   try {
     return output(await bridgeStatusForMcp());
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+server.registerTool("figma_operation_status", {
+  title: "Check a tracked Figma operation",
+  description: "Read the state, latest progress, error, or completed result for a long-running Figma operation. Always check a timed-out or still-running operation before retrying it.",
+  inputSchema: {
+    operationId: external_exports.string().trim().min(1).max(200),
+    includeResult: external_exports.boolean().default(true)
+  }
+}, async (input) => {
+  try {
+    return output(await operationStatusForMcp(input.operationId, input.includeResult));
   } catch (error51) {
     return failure(error51);
   }
@@ -32578,6 +33314,95 @@ server.registerTool("figma_navigate_to_page", {
     return failure(error51);
   }
 });
+server.registerTool("figma_create_page", {
+  title: "Create a Figma page",
+  description: "Create a page in the connected Figma file and switch to it. Idempotent by exact name: when a page with that name already exists, nothing is created and that page is returned with created: false. Create pages only when the user asked for one or the work clearly needs its own page.",
+  inputSchema: {
+    name: external_exports.string().trim().min(1).max(200),
+    index: external_exports.number().int().min(0).max(1e3).optional().describe("Optional position in the page list (0 = first). Defaults to the end."),
+    navigate: external_exports.boolean().default(true).describe("Switch to the page after creating or finding it.")
+  }
+}, async (input) => {
+  try {
+    return output(await sendCommand("createPage", input));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+var fontRef = external_exports.object({
+  family: external_exports.string().trim().min(1).max(200),
+  style: external_exports.string().trim().min(1).max(200).optional()
+});
+server.registerTool("figma_font_inventory", {
+  title: "Inventory fonts in a Figma subtree",
+  description: "Read-only. Count text ranges by font family and style under the given pages, sections or frames (default: the current page), split by what decides each font: a library text style, a local text style, a main component (text inside an instance) or the layer itself. Also lists local text styles. Scope large pages by section to keep the work bounded.",
+  inputSchema: {
+    rootIds: external_exports.array(nodeId).max(50).optional(),
+    maxNodes: external_exports.number().int().min(1).max(1e5).default(5e4)
+  }
+}, async (input) => {
+  try {
+    return output(await sendCommand("fontInventory", input, 12e4));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+server.registerTool("figma_retype_font", {
+  title: "Swap fonts across a Figma subtree",
+  description: "Swap fonts per map [{from:{family, style?}, to:{family, style?}}] under the given roots: updates local text styles that use a from font, and text ranges that set their own font. Ranges bound to a text style follow the style, and text inside instances follows its main component, so both are skipped and counted. Library styles change in the library file. dryRun defaults to true; run it first, then repeat with dryRun:false.",
+  inputSchema: {
+    map: external_exports.array(external_exports.object({ from: fontRef, to: fontRef })).min(1).max(20),
+    rootIds: external_exports.array(nodeId).min(1).max(50),
+    updateLocalStyles: external_exports.boolean().default(true),
+    exceptCharacters: external_exports.array(external_exports.string().min(1).max(200)).max(50).optional().describe("Skip layers whose whole text matches one of these, such as a wordmark."),
+    rename: external_exports.object({ find: external_exports.string().min(1).max(200), replace: external_exports.string().max(200) }).optional().describe("Rewrite this substring in the names of retyped layers."),
+    dryRun: external_exports.boolean().default(true),
+    maxNodes: external_exports.number().int().min(1).max(5e4).default(2e4)
+  }
+}, async (input) => {
+  try {
+    return output(await sendCommand("retypeFont", input, 12e4));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+server.registerTool("figma_set_variable_values", {
+  title: "Set local variable values",
+  description: "Set the value of local variables (string, number, boolean or colour object) in one mode, default the collection's default mode. dryRun defaults to true and reports the current values.",
+  inputSchema: {
+    items: external_exports.array(external_exports.object({
+      id: external_exports.string().trim().min(1).max(200),
+      value: external_exports.union([external_exports.string().max(2e3), external_exports.number(), external_exports.boolean(), external_exports.object({ r: external_exports.number(), g: external_exports.number(), b: external_exports.number(), a: external_exports.number().optional() })]),
+      modeId: external_exports.string().trim().min(1).max(200).optional()
+    })).min(1).max(100),
+    dryRun: external_exports.boolean().default(true)
+  }
+}, async (input) => {
+  try {
+    return output(await sendCommand("setVariableValues", input));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
+server.registerTool("figma_set_text_style_fonts", {
+  title: "Set the font of local text styles",
+  description: "Set the font family and style (and optionally letter spacing in percent) of named local text styles in the open file; size, line height and other properties stay. Every layer using the style updates. dryRun defaults to true.",
+  inputSchema: {
+    styles: external_exports.array(external_exports.object({
+      name: external_exports.string().trim().min(1).max(300),
+      family: external_exports.string().trim().min(1).max(200),
+      style: external_exports.string().trim().min(1).max(200),
+      letterSpacingPercent: external_exports.number().min(-100).max(100).optional()
+    })).min(1).max(100),
+    dryRun: external_exports.boolean().default(true)
+  }
+}, async (input) => {
+  try {
+    return output(await sendCommand("setTextStyleFonts", input));
+  } catch (error51) {
+    return failure(error51);
+  }
+});
 server.registerTool("figma_query_page_nodes", {
   title: "Query Figma page nodes",
   description: "List nodes on the active Figma page with stable IDs, bounds, parent hierarchy, and concise visual/text style metadata. Use selector for a Figma node-query selector; otherwise use query and/or nodeTypes for simple filtering. Set includeHierarchy to retrieve the page's top-level tree instead.",
@@ -32632,7 +33457,7 @@ server.registerTool("figma_list_artboards", {
 server.registerTool("figma_read_frame_content", {
   title: "Read Figma frame content",
   description: "Read text inside one frame in visual order. Summary mode returns stable IDs, visible copy, bounds, visibility, and font sizes without verbose hierarchy; full mode also returns names, hierarchy, and hidden copy.",
-  inputSchema: { nodeId, detail: readDetail, includeHidden: external_exports.boolean().default(false) }
+  inputSchema: { nodeId, detail: readDetail, includeHidden: external_exports.boolean().default(false), auditLayout: external_exports.boolean().default(false), auditPaints: external_exports.boolean().default(false) }
 }, async (input) => {
   try {
     return output(await sendCommand("readFrameContent", input));
@@ -32657,7 +33482,7 @@ server.registerTool("figma_read_copy", {
 server.registerTool("figma_read_spread_content", {
   title: "Read Figma spread content",
   description: "Read copy from a page pair or multi-artboard spread. Frames follow the supplied nodeIds order; text follows visual reading order. Returns per-frame structure, combined visible `copy`, and `allCopy` including hidden/conditional text.",
-  inputSchema: { nodeIds: external_exports.array(nodeId).min(2).max(20), detail: readDetail, includeHidden: external_exports.boolean().default(false) }
+  inputSchema: { nodeIds: external_exports.array(nodeId).min(2).max(20), detail: readDetail, includeHidden: external_exports.boolean().default(false), auditLayout: external_exports.boolean().default(false), auditPaints: external_exports.boolean().default(false) }
 }, async (input) => {
   try {
     return output(await sendCommand("readSpreadContent", input));
@@ -32667,8 +33492,8 @@ server.registerTool("figma_read_spread_content", {
 });
 server.registerTool("figma_audit_text_overflow", {
   title: "Audit Figma text overflow",
-  description: "Audit visible text inside a frame for fixed-height overflow, truncation/max-line settings, missing fonts, and clipping. Invisible or opacity-zero text is skipped by default; set includeHidden only when intentionally auditing hidden variants.",
-  inputSchema: { nodeId, includeHidden: external_exports.boolean().default(false), detail: readDetail }
+  description: "Audit one bounded batch of text for overflow, truncation, missing fonts, and clipping. Hidden text is skipped by default. Each response contains only this batch's findings plus cumulative totals. If complete=false, continue with nextCursor on the same target, nodeId and includeHidden; do not call a partial zero-warning batch clean. Stop by not requesting another batch. Cursors expire after five minutes or a plugin restart; edits between batches require a fresh audit.",
+  inputSchema: { nodeId, includeHidden: external_exports.boolean().default(false), detail: readDetail, ...auditBatchInput, cursor: external_exports.string().min(1).max(200).optional().describe("Opaque nextCursor from the preceding batch; use it only once with the same file, page, root and includeHidden.") }
 }, async (input) => {
   try {
     return output(await sendCommand("auditTextOverflow", input, 12e4));
@@ -32678,7 +33503,7 @@ server.registerTool("figma_audit_text_overflow", {
 });
 server.registerTool("figma_apply_copy_updates", {
   title: "Apply and verify Figma copy updates",
-  description: "Apply a bounded batch of text changes, then audit and export named frames in the same plugin transaction. Uses expectedText guards and minimal character-range replacement to reduce stale writes and preserve unaffected mixed styles. Hidden text is excluded from audits by default.",
+  description: "Apply a bounded batch of text changes, then audit and export named frames in the same plugin transaction. Uses expectedText guards and minimal character-range replacement to reduce stale writes and preserve unaffected mixed styles. Each overflow audit runs one bounded batch; verificationComplete=false requires continuing its nextCursor with figma_audit_text_overflow, not repeating the copy edits. Hidden text is excluded from audits by default.",
   inputSchema: {
     updates: external_exports.array(external_exports.object({
       nodeId,
@@ -32715,9 +33540,11 @@ server.registerTool("figma_export_frame_png", {
 });
 server.registerTool("figma_prepare_review", {
   title: "Prepare Figma artboards for review",
-  description: "After figma_list_artboards, prepare one artboard or an ordered spread for copy/layout review in one call. Reads structured copy and optionally audits text overflow in one plugin operation, then writes each artboard to a local PNG. It never leaves document edits.",
+  description: "After figma_list_artboards, prepare one artboard or an ordered spread for copy/layout review. Reads structured copy and optionally runs one bounded overflow-audit batch per frame, then writes local PNGs. Partial audits set verificationComplete=false; continue each nextCursor with figma_audit_text_overflow before claiming verification. It never leaves document edits.",
   inputSchema: {
     nodeIds: external_exports.array(nodeId).min(1).max(8).describe("One to eight artboard IDs in the exact review/spread order returned by figma_list_artboards."),
+    auditLayout: external_exports.boolean().default(false),
+    auditPaints: external_exports.boolean().default(false),
     auditOverflow: external_exports.boolean().default(true),
     detail: readDetail,
     maxDimension: external_exports.number().int().min(128).max(8192).default(4096).describe("Maximum longest dimension for each local PNG."),
@@ -32725,9 +33552,11 @@ server.registerTool("figma_prepare_review", {
   }
 }, async (input) => {
   try {
-    const { content, overflowAudits } = await sendCommand("prepareReviewData", {
+    const { content, overflowAudits, verificationComplete } = await sendCommand("prepareReviewData", {
       nodeIds: input.nodeIds,
       detail: input.detail,
+      auditLayout: input.auditLayout,
+      auditPaints: input.auditPaints,
       auditOverflow: input.auditOverflow
     }, input.auditOverflow ? Math.min(6e5, 12e4 * input.nodeIds.length) : 3e4);
     const exports = [];
@@ -32743,7 +33572,8 @@ server.registerTool("figma_prepare_review", {
       content,
       exports,
       ...input.auditOverflow ? { overflowAudits } : {},
-      nextStep: "Inspect every exported PNG together with the structured copy before proposing or making edits."
+      verificationComplete,
+      nextStep: verificationComplete === false ? "Continue each incomplete overflow audit using its nextCursor with figma_audit_text_overflow on the same target and frame. Inspect the structured copy and exported PNGs. Do not repeat edits or treat a partial scan as verified." : "Inspect every exported PNG together with the structured copy before proposing or making edits."
     });
   } catch (error51) {
     return failure(error51);
@@ -32778,7 +33608,7 @@ server.registerTool("figma_set_selection", {
 });
 server.registerTool("figma_move_resize_reparent", {
   title: "Move, resize, or reparent a Figma node",
-  description: "Update an existing current-page node's x/y position, dimensions, and/or parent. Coordinates are relative to the resulting parent. Reparenting can be rejected by Figma for protected structures such as instance children.",
+  description: "Update an existing current-page node's x/y position, dimensions, and/or parent. Coordinates are relative to the resulting parent. If a CROP image fill is resized to a different aspect ratio, it switches to centered FILL so the image stays undistorted; the result reports this adjustment. Reparenting can be rejected by Figma for protected structures such as instance children.",
   inputSchema: external_exports.object({
     nodeId,
     parentId: nodeId.optional().describe("Optional new current-page parent ID."),
@@ -32900,37 +33730,56 @@ server.registerTool("figma_supersede_layout", {
     return failure(error51);
   }
 });
+var compositionInputSchema = {
+  operationId: external_exports.string().trim().min(1).max(200).optional().describe("Optional idempotency key. Reuse the same ID to resume or recover the same composition instead of creating a duplicate."),
+  frame: external_exports.object({
+    name: external_exports.string().trim().min(1).max(200),
+    width: external_exports.number().finite().min(1).max(1e4),
+    height: external_exports.number().finite().min(1).max(1e4),
+    ...position,
+    parentId: nodeId.optional().describe("Optional native section or frame parent for the composed root frame."),
+    layout: external_exports.enum(["none", "horizontal", "vertical"]).default("none"),
+    itemSpacing: external_exports.number().finite().min(0).max(1e3).default(0),
+    padding: external_exports.number().finite().min(0).max(1e3).default(0),
+    ...visualStyle
+  }),
+  elements: external_exports.array(composeFrameElement).min(1).max(100),
+  archiveNodeIds: external_exports.array(nodeId).max(100).default([]),
+  archiveName: external_exports.string().trim().min(1).max(200).default("Previous layout"),
+  archiveReason: external_exports.string().trim().min(1).max(500).default("Superseded by composed layout"),
+  audit: external_exports.boolean().default(true),
+  export: external_exports.boolean().default(true),
+  maxDimension: external_exports.number().int().min(128).max(8192).default(4096),
+  scale: external_exports.number().finite().min(0.1).max(4).default(2),
+  collisionPolicy: collisionPolicy.default("reject").describe("Reject sibling overlap by default. Use report only for an intentional overlap; ignore suppresses the guard.")
+};
+function compositionCommandInput(input) {
+  const { operationId, ...commandInput } = input;
+  return { operationId, commandInput };
+}
 server.registerTool("figma_compose_frame", {
   title: "Compose and verify a Figma frame",
-  description: "Create one frame plus ordered panels, dividers, and styled-span text in a single guarded plugin command. On failure every newly created node is removed. Optionally archive previous sibling nodes only after composition succeeds, then audit and export the replacement.",
-  inputSchema: {
-    frame: external_exports.object({
-      name: external_exports.string().trim().min(1).max(200),
-      width: external_exports.number().finite().min(1).max(1e4),
-      height: external_exports.number().finite().min(1).max(1e4),
-      ...position,
-      parentId: nodeId.optional().describe("Optional native section or frame parent for the composed root frame."),
-      layout: external_exports.enum(["none", "horizontal", "vertical"]).default("none"),
-      itemSpacing: external_exports.number().finite().min(0).max(1e3).default(0),
-      padding: external_exports.number().finite().min(0).max(1e3).default(0),
-      ...visualStyle
-    }),
-    elements: external_exports.array(composeFrameElement).min(1).max(100),
-    archiveNodeIds: external_exports.array(nodeId).max(100).default([]),
-    archiveName: external_exports.string().trim().min(1).max(200).default("Previous layout"),
-    archiveReason: external_exports.string().trim().min(1).max(500).default("Superseded by composed layout"),
-    audit: external_exports.boolean().default(true),
-    export: external_exports.boolean().default(true),
-    maxDimension: external_exports.number().int().min(128).max(8192).default(4096),
-    scale: external_exports.number().finite().min(0.1).max(4).default(2),
-    collisionPolicy: collisionPolicy.default("reject").describe("Reject sibling overlap by default. Use report only for an intentional overlap; ignore suppresses the guard.")
-  }
+  description: "Create one frame plus ordered native panels, image-filled areas, dividers, and styled-span text in one tracked command. Required image areas participate in verification, and previous nodes are archived only after verification succeeds. For proactive progress polling, use figma_start_composition.",
+  inputSchema: compositionInputSchema
 }, async (input) => {
+  const { operationId, commandInput } = compositionCommandInput(input);
   try {
-    const result = requireCompositionResult(await sendCommand("composeFrame", input, 3e5), input.elements.length);
-    return output(await localizeBatchExports(result));
+    const result = requireCompositionResult(await sendTrackedCommand("composeFrame", commandInput, { operationId, waitForCompletion: true, timeoutMs: 3e5 }), input.elements.length);
+    return output(result);
   } catch (error51) {
-    return structuredFailure(error51?.code ?? "COMPOSITION_FAILED", error51, { requestedElementCount: input.elements.length });
+    return structuredFailure(error51?.code ?? "COMPOSITION_FAILED", error51, { requestedElementCount: input.elements.length, ...error51?.operationId ? { operationId: error51.operationId } : {} });
+  }
+});
+server.registerTool("figma_start_composition", {
+  title: "Start a tracked Figma composition",
+  description: "Start a long native-frame composition and return immediately with an operation ID. Poll figma_operation_status for phase, percentage, warnings, and the final result; reuse the same operationId rather than starting a duplicate.",
+  inputSchema: compositionInputSchema
+}, async (input) => {
+  const { operationId, commandInput } = compositionCommandInput(input);
+  try {
+    return output(await sendTrackedCommand("composeFrame", commandInput, { operationId, waitForCompletion: false, timeoutMs: 3e5 }));
+  } catch (error51) {
+    return structuredFailure(error51?.code ?? "COMPOSITION_START_FAILED", error51, { requestedElementCount: input.elements.length, ...error51?.operationId ? { operationId: error51.operationId } : {} });
   }
 });
 server.registerTool("figma_copy_style_from_node", {
@@ -33011,7 +33860,7 @@ server.registerTool("figma_apply_design_style", {
 });
 server.registerTool("figma_copy_image_fill", {
   title: "Copy or crop a Figma image fill",
-  description: "Copy the first existing image fill from a source node to a target node, optionally changing FILL/FIT/CROP/TILE mode and supplying a Figma 2\xD73 crop transform. The underlying approved image remains in Figma.",
+  description: "Copy the first existing image fill from a source node to a target node, optionally changing FILL/FIT/CROP/TILE mode and supplying a Figma 2\xD73 crop transform. An inherited CROP switches to centered FILL when proportions differ, reporting image.adjustment; explicit crop modes/transforms are preserved. The underlying approved image remains in Figma.",
   inputSchema: {
     sourceNodeId: nodeId,
     targetNodeId: nodeId,
@@ -33027,9 +33876,10 @@ server.registerTool("figma_copy_image_fill", {
 });
 server.registerTool("figma_place_local_image", {
   title: "Place an approved local image in Figma",
-  description: "Read an explicitly approved absolute local PNG/JPEG/GIF/WebP path (maximum 25 MB), create an image-filled rectangle in the current Figma page or parent, and return its node ID. No network fetch is performed.",
+  description: "Place an explicitly approved PNG/JPEG/GIF/WebP image from one absolute local path or HTTPS URL (maximum 25 MB) as an image-filled rectangle in the current Figma page or parent. URL fetches are restricted to public IPs and revalidated across redirects.",
   inputSchema: {
-    path: external_exports.string().trim().min(1).max(4096),
+    path: external_exports.string().trim().min(1).max(4096).optional(),
+    url: external_exports.string().trim().min(1).max(8192).optional().describe("HTTPS URL to an image. Only public IP destinations are fetched, with redirects revalidated."),
     name: external_exports.string().trim().min(1).max(200),
     width: external_exports.number().finite().min(1).max(1e4),
     height: external_exports.number().finite().min(1).max(1e4),
@@ -33266,7 +34116,7 @@ function clearProxyHealthTimer() {
   proxyHealthTimer = null;
 }
 async function checkOwnerAndElect() {
-  if (stopping || bridgeRole === "owner" || electionInFlight || proxyHealthInFlight) return;
+  if (proxyOnly || stopping || bridgeRole === "owner" || electionInFlight || proxyHealthInFlight) return;
   proxyHealthInFlight = true;
   let healthy = false;
   try {
@@ -33285,11 +34135,17 @@ function scheduleProxyHealthChecks() {
   proxyHealthTimer.unref();
 }
 function tryBecomeOwner() {
-  if (stopping || bridgeListening || electionInFlight) return;
+  if (proxyOnly || stopping || bridgeListening || electionInFlight) return;
   electionInFlight = true;
   const onError = (error51) => {
     electionInFlight = false;
     if (stopping) return;
+    if (httpOwnerOnly) {
+      process.stderr.write(`figma-local HTTP owner could not listen: ${error51.message}
+`);
+      stop(true);
+      return;
+    }
     setBridgeRole("proxy");
     scheduleProxyHealthChecks();
     if (error51.code !== "EADDRINUSE") {
@@ -33327,12 +34183,13 @@ process.once("SIGINT", () => stop(true));
 process.once("SIGTERM", () => stop(true));
 process.once("disconnect", () => stop(true));
 var orphanWatchdog = setInterval(() => {
-  if (process.ppid === 1 && launchParentPid !== 1) stop(true);
+  if (!httpOwnerOnly && process.ppid === 1 && launchParentPid !== 1) stop(true);
 }, 1e3);
 orphanWatchdog.unref();
-connectMcp().catch((error51) => {
+if (!httpOwnerOnly) connectMcp().catch((error51) => {
   process.stderr.write(`figma-local bridge could not start MCP: ${error51 instanceof Error ? error51.message : String(error51)}
 `);
   stop(true);
 });
-tryBecomeOwner();
+if (proxyOnly) setBridgeRole("proxy");
+else tryBecomeOwner();

@@ -2,6 +2,32 @@
 
 The [README](../README.md) has setup and the quickest review path. The bundled [workflow skill](../skills/figma-local-workflow/SKILL.md) gives agents the inspect-first sequence.
 
+## Connections, targeting and service lifecycle
+
+The background owner runs `dist/server.mjs --http-owner`; MCP clients run `dist/server.mjs --proxy-only` and share its loopback endpoint. Closing or restarting a Codex or Claude Code MCP client does not stop the owner or disconnect Figma plugins. On macOS, `scripts/service.mjs` manages the per-user launch agent. When changing its plist or environment, use **stop → install → start**; `restart` only restarts the currently loaded service configuration.
+
+Run Local MCP Bridge in each file you want to use and leave its panel open. `figma_list_connections` lists runtime `targetId` values, labels, pages, health, activity and any supplied file links. Check `figma_bridge_status` and the expected file/page before working. With several connections, pass the chosen runtime ID, `file:<key>` or `name:<saved label>` as `targetId` to every canvas tool. Selection or foreground focus does not choose an agent's target.
+
+A client can set `FIGMA_BRIDGE_TARGET` or a per-call `targetId` to a runtime ID, `file:<key>`, or `name:<saved label>`. File references use supplied HTTPS Figma URLs; names match saved labels/document names exactly, never page names. No match or multiple matches fail before dispatch. Discovery returns `namedTargetRefs` and `stableTargetRef`. Explicit calls override only that request; client defaults remain unchanged. Resolved runtime and session IDs stay pinned for the entire operation.
+
+The plugin's **Connected files** panel lists already-connected files. Choosing a row exposes its target ID and saved link; the assistant still chooses the target explicitly. Opening a saved URL opens the file but does not launch its bridge plugin. This list is not a REST-backed inventory of every accessible Figma file.
+
+Choose **Save connection details** to remember a connection name and HTTPS file URL across plugin restarts. The plugin writes only a small versioned record under its private, namespaced document-root key `figma_local_bridge.connection.v1`; it does not create or change visible canvas nodes. The record belongs to the Figma file, is restored before the first bridge connection and survives normal Figma save/sync. Separate files keep separate records. No REST call, token or private Figma API is used. Clear both fields and save to remove the record.
+
+The panel distinguishes **Saved with this Figma file** from **Restored** details. A successful file save remains saved if bridge publication fails; the panel reports that it is waiting to publish. A storage-write failure does not replace the previous runtime details. Invalid or unsupported saved records are ignored with an actionable message rather than automatically advertising an unsafe link.
+
+Copied or duplicated files can inherit the saved record. Verify and update a copy's URL before using it with a pinned client. A remembered supplied URL is not independently verified file identity, and two operational connections advertising the same file reference still fail the unique-pin check. See [this machine's setup](../LOCAL-SETUP.md) for its configured client pins and existing preference-store location.
+
+### Concurrency and interrupted calls
+
+Logical MCP canvas calls hold a lease on their target connection, keeping a composite read/export operation together while other connections can proceed. A lease covers one plugin runtime. Two windows advertising the same file are flagged as possible duplicates when their supplied identities match; they do not share a document-wide lease. Use one writer per actual file.
+
+Canvas tools accept an `operationId` recovery key. Reuse it only with the same target and inputs. A repeated completed request returns its recorded result without sending the canvas command again. A queued ordinary request that expires is removed before dispatch; a tracked caller timeout retains the original operation for status checks and recovery. Dispatched work is not cancelled by a caller timeout.
+
+An unknown dispatched outcome keeps an execution fence on the target. Inspect operation status and the affected document before recovery. `figma_acknowledge_uncertain_operation` requires explicit user confirmation and a replacement session; it never replays the old operation. A matching late completion can release the fence while the recorded outcome remains unknown. Do not acknowledge automatically or interpret a zero pending count as proof that plugin execution stopped.
+
+Operation history is held in the owner process's memory for up to one hour, with a terminal-record count limit. It survives MCP client restarts, but not an owner restart. If a recovery ID is no longer known, inspect the document before beginning another edit. Automatic plugin reconnection does not restore that history or replay work.
+
 ## Workflows
 
 ### Design-system preference workflow
@@ -10,16 +36,16 @@ The [README](../README.md) has setup and the quickest review path. The bundled [
 
 If multiple systems remain equally plausible, call `figma_resolve_design_choice`. A tie returns `needsClarification: true` with candidate details and must not trigger an edit. Ask the user which system to use; apply that answer once, or save it with `figma_set_user_preference` only after explicit confirmation. Preferences can be queried, updated, deleted, and reverted in ordinary LLM conversation. Revision guards prevent two MCP tasks from silently overwriting each other.
 
-Preferences are private to the local OS user and stored at `~/.figma-local-bridge/preferences.json` by default. Set `FIGMA_PREFERENCES_DIR` to relocate the store. The bridge never infers or saves preferences from the canvas automatically.
+Preferences are private to the local OS user and stored at `~/.figma-local-bridge/preferences.json` by default. Set `FIGMA_PREFERENCES_DIR` to use an existing store. This machine explicitly keeps its existing store at `~/.local/share/figma-local-bridge-state/preferences.json`; moving the repository must not create a replacement preference store. The bridge never infers or saves preferences from the canvas automatically.
 
 ### External copy-sync workflow
 
 When the user identifies an external system as the source of truth:
 
-1. List artboards and call `figma_read_copy` for the exact target frame IDs.
+1. Confirm the connection/target, list artboards and call `figma_read_copy` for the exact target frame IDs.
 2. Diff external fields against the returned text IDs and `copy`. Omit unchanged nodes.
-3. Call `figma_apply_copy_updates` once, passing each prior value as `expectedText`, and include affected frames in both `auditFrames` and `exportFrames`.
-4. Inspect the local PNGs and audits returned by that call. Use `figma_set_text_frame` or `figma_split_text_block` only when changed hierarchy or fit requires it, then verify again.
+3. Call `figma_apply_copy_updates` once, passing each prior value as `expectedText`. Include affected `auditFrames` when fit needs checking and `exportFrames` when visual verification is needed; routine copy-only checks do not require PNG exports.
+4. Re-read the affected copy and inspect any returned audits/PNGs. Use `figma_set_text_frame` or `figma_split_text_block` only when changed hierarchy or fit requires it, then verify again.
 
 Delete only a clearly stray element identified by the user. Preserve all other nodes, including hidden or superseded content.
 
@@ -27,9 +53,14 @@ Delete only a clearly stray element identified by the user. Preserve all other n
 
 1. List artboards, read the target in `summary` mode, and export its current PNG.
 2. Call `figma_list_design_system_assets` and `figma_list_page_tokens`. Prefer verified linked components, named styles, and variables; use `figma_copy_style_from_node` against an on-brand source node when needed. Do not approximate available assets, fonts, or colours.
-3. Call `figma_compose_frame` with one named replacement frame and ordered frame/rectangle/text elements. Use styled spans for mixed emphasis and typographic case inside a single text layer; keep the stored copy in natural case. The command removes its whole new subtree if any element fails.
-4. Prefer passing explicit `archiveNodeIds` to the composer so previous sibling content is grouped and hidden only after the replacement succeeds. Otherwise verify the replacement, then call `figma_supersede_layout` or `figma_archive_nodes`.
-5. Inspect the returned compact overflow audit and local PNG. Re-read in `full` mode only when hierarchy or hidden variants require diagnosis.
+3. Call `figma_compose_frame` with one named replacement frame and ordered frame/rectangle/text elements. Use styled spans for mixed emphasis and typographic case inside a single text layer; keep the stored copy in natural case. A frame or rectangle can set `imageSourceNodeId` to reuse an existing image fill and `imageRequired: true` to make an empty image area fail completion verification.
+4. For a potentially slow board, call `figma_start_composition`, then poll `figma_operation_status`. Reuse its operation ID after interruption; errors also include the recovery ID. Never start a second composition while the first is queued, running or unknown. If the bridge restarted and lost its history, inspect the document before starting again.
+5. Prefer passing explicit `archiveNodeIds` to the composer. Previous sibling content is grouped and hidden only when text/export/image verification is complete; otherwise it is preserved and the result explains why archival was skipped.
+6. Inspect the returned compact overflow audit, image audit, and local PNG. Re-read in `full` mode only when hierarchy or hidden variants require diagnosis.
+
+Required images must have a visible image paint with positive opacity on an effectively visible element. Hidden or transparent paints, elements and ancestors fail verification and leave previous content in place. This check does not prove that a visible image is unobscured or appropriately composed; inspect the visual preview when that matters.
+
+Compositions and `figma_copy_image_fill` switch an inherited CROP to centered FILL when source and target proportions differ. They report the adjustment in `imageFillAdjustments` or `image.adjustment`. A supplied crop mode or transform is preserved; review that explicit crop at its final dimensions. `figma_move_resize_reparent` likewise reports crop resets in `imageResizeAdjustments`.
 
 ### Colour-token workflow
 
@@ -39,6 +70,8 @@ When a prompt names colours, call `figma_create_color_tokens` before creating ar
 
 The bridge keeps its command surface intentionally narrow. It exposes the following controlled operations rather than arbitrary Plugin API code:
 
+- `figma_list_connections` / `figma_bridge_status` — discover connected targets and verify their current page, health, versions and activity.
+- `figma_acknowledge_uncertain_operation` — acknowledge an inspected unknown outcome after session replacement, only with explicit user confirmation; never automatically retry an uncertain edit.
 - `figma_create_frame` — exact dimensions, solid fill/stroke, clipping, auto-layout, and optional parent.
 - `figma_create_rectangle` / `figma_create_ellipse` — graphic blocks, CTA backgrounds, and simple devices.
 - `figma_create_text` — editable text with colour, wrapping, alignment, line height, letter spacing, typographic case, styled spans, opacity, and optional parent.
@@ -65,20 +98,21 @@ The bridge keeps its command surface intentionally narrow. It exposes the follow
 - `figma_export_frame_png` — write a PNG to `~/Pictures/Figma MCP Exports` and return only its absolute path and dimensions.
 - `figma_prepare_review` — read and optionally audit one to eight ordered artboards in one packaged plugin operation, then export them locally in the same MCP call.
 - `figma_archive_nodes` / `figma_supersede_layout` — hide explicit prior siblings in a named reversible group and record the replacement relationship.
-- `figma_compose_frame` — atomically create a native frame in the page or a section, with root auto-layout, panels/dividers and styled-span text; reject accidental overlap and empty/incomplete results.
+- `figma_compose_frame` — create a tracked native frame in the page or a section, with root auto-layout, panels/dividers, styled-span text, direct reuse of existing image fills, and required-image verification.
+- `figma_start_composition` / `figma_operation_status` — start a long composition without blocking, then inspect its phase, percentage, warnings, error, or completed result before retrying.
 - `figma_copy_style_from_node` / `figma_list_page_tokens` — inherit verified on-brand styling and discover local variables/styles plus page usage.
 - `figma_list_design_system_assets` — discover components, styles, and variables verified in the current file, including remote assets currently used and enabled linked-library variable collections.
 - `figma_create_component_instance` / `figma_apply_design_style` — create a linked instance or apply a named local/library style by verified ID or key.
 - `figma_get_user_preferences` / `figma_set_user_preference` / `figma_delete_user_preference` / `figma_revert_user_preferences` — manage explicit, revision-guarded per-user design-system guidance.
 - `figma_resolve_design_choice` — score candidates against confirmed scoped preferences and require clarification rather than guessing when they tie.
-- `figma_copy_image_fill` / `figma_place_local_image` — reuse/crop an existing Figma image or place an explicitly approved local raster image.
-- `figma_comment_status` / `figma_list_comments` — check optional REST setup and read file comments, with resolved comments excluded by default.
-- `figma_post_comment` — post a canvas- or frame-pinned comment, or reply to an existing comment.
-- `figma_delete_comment` — permanently delete one identified comment behind an explicit confirmation guard.
+- `figma_copy_image_fill` / `figma_place_local_image` — reuse/crop an existing Figma image or place an explicitly approved local raster image. `figma_place_local_image` accepts exactly one absolute local path or HTTPS URL, caps transfers at 25 MB, follows at most five redirects, validates every destination as public, and checks image bytes before importing.
+- Optional builds with API access enabled also expose `figma_comment_status`, `figma_list_comments`, `figma_post_comment` and `figma_delete_comment`. This installation sets `FIGMA_BRIDGE_API_DISABLED=1`, so those tools are not advertised.
 
 For brand assets, read a trusted SVG file locally and pass its content to `figma_import_svg`; do not redraw logo artwork as text or paths. SVG import is only for approved logos, icons and isolated vector artwork—not boards, UI layouts, panels or editable labels.
 
 ## Optional comment setup
+
+**Disabled on this machine.** The owner's and clients' `FIGMA_BRIDGE_API_DISABLED=1` setting hides comment tools, blocks REST and credential-save/test/clear routes, and bypasses credential lookup. Existing blank credentials, memory-only credential storage and the `http://127.0.0.1:9` API blackhole remain in place. Do not add a token, enable private API access or change that endpoint without the user's explicit instruction. The following upstream capability notes are retained as reference for separately authorized installations.
 
 Figma does not expose comments to its Plugin API, so comment tools are the one part of the bridge that needs REST credentials. Open **Figma API access** in the connected plugin, paste a personal access token and the file URL, then choose **Save & test**. Grant `file_comments:read`; add `file_comments:write` if you also want to post, reply, or delete.
 
@@ -88,8 +122,18 @@ The bridge saves the token in macOS Keychain, Windows user-scoped DPAPI encrypti
 
 ## Security model
 
-The canvas bridge listens only on localhost (`127.0.0.1`), so it is not reachable over your network. Browser requests are accepted only without an Origin header or from Figma origins; unrelated web pages cannot use its CORS surface. It intentionally removes the former shared bridge token to make the local Figma workflow frictionless. Other local processes running as your OS user could still call its port while the MCP is open, so do not use it on a shared, untrusted computer.
+The owner accepts only loopback IP bindings (`127.0.0.1` or `::1`); this machine uses `127.0.0.1:3846`. It rejects unexpected Host headers. Internal command, lease and recovery routes reject browser Origin headers, including `null`, and require JSON where applicable. Canvas commands remain named, validated operations; the bridge does not accept agent-written JavaScript.
 
-If comment support is enabled, the server sends the saved token only to Figma's configured API endpoint in an `X-Figma-Token` header. The plugin UI passes a newly entered token directly to the authenticated localhost bridge, clears the field immediately, and never sends it through the plugin main thread or stores it in the Figma document. Secure storage is macOS Keychain, Windows CurrentUser DPAPI, or Linux Secret Service; when none is usable, the UI reports a session-only fallback. Environment variables remain available for managed setups. Grant only the comment scopes you need. Canvas tools continue to work without a token.
+The transport relies on a trusted local machine and does not use secret pairing. Other local processes can access the port. Plugin/status routes also accept permitted Figma origins, the matching local endpoint origin and opaque `Origin: null` frames needed by the plugin iframe. A browser frame with access to loopback can therefore reach that surface; Host/CORS checks do not authenticate a plugin connection or make this safe against untrusted local software. Strong plugin authentication is outside this implementation's scope.
+
+In an API-enabled installation, optional comment requests send the stored token to the configured API endpoint in an `X-Figma-Token` header. The UI clears a newly entered token immediately and does not put it in the Figma document. Secure credential storage is macOS Keychain, Windows CurrentUser DPAPI, or Linux Secret Service; when none is usable, the UI reports a session-only fallback. This machine's explicit API-disabled setting takes precedence over configured credentials and prevents those requests. Canvas tools need no Figma REST token.
 
 The preference store is created with user-only file permissions. It contains guidance you explicitly ask the LLM to remember, not Figma document contents. No preference is learned or written automatically.
+
+## Audit batches and compact panel
+
+Overflow audits return bounded batch findings and cumulative `totals` and top-level counts. `text` and `batch` describe only the current batch. Defaults: `maxTextNodes: 40`, `maxTraversalNodes: 400`, `timeBudgetMs: 1000`; maxima: 200, 4000 and 3000 respectively. `complete: false` requires continuing `nextCursor` on the same target, current page, root and `includeHidden`. Cursors are single-use, runtime-local, kept for at most five minutes, and limited to eight outstanding scans. Stop by omitting further continuation calls. Restart after document edits. Time limits are cooperative; they do not interrupt one native Figma API await.
+
+Summary mode retains completion and continuation fields. Packaged reviews/copy updates and compositions must not claim verification or archive a predecessor when audits are incomplete. Continue the audit separately and inspect all batches before another write.
+
+The compact panel retains current file, connection status, activity and error messages. Expand/Compact changes only the panel, preserving active work and the HTTP transport. `figma_local_bridge.panel_compact.v1` stores only a Boolean view preference in per-user Figma client storage; file labels/URLs remain in their existing per-document record.

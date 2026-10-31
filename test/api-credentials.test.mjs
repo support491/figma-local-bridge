@@ -128,3 +128,44 @@ test("plugin-managed credentials stay private and proxy comment calls use the ow
   await stop(proxy);
   await stop(owner);
 });
+
+test("explicit local-only API disable overrides tokens and never contacts the API", { timeout: 15_000 }, async (context) => {
+  const port = await freePort(); const apiPort = await freePort();
+  const directory = await mkdtemp(join(tmpdir(), "figma-api-disabled-"));
+  let apiRequests = 0;
+  const honeypot = http.createServer((_request, response) => { apiRequests += 1; response.end("unexpected"); });
+  await new Promise((resolve) => honeypot.listen(apiPort, "127.0.0.1", resolve));
+  const child = spawn(process.execPath, [new URL("../server.mjs", import.meta.url).pathname, "--http-owner"], {
+    env: { ...process.env, FIGMA_BRIDGE_HOST: "127.0.0.1", FIGMA_BRIDGE_PORT: String(port), FIGMA_BRIDGE_API_DISABLED: "1", FIGMA_ACCESS_TOKEN: "fake-token-must-not-be-used", FIGMA_FILE_KEY: "fake-key", FIGMA_CREDENTIAL_BACKEND: "memory", FIGMA_PREFERENCES_DIR: directory, FIGMA_API_BASE_URL: `http://127.0.0.1:${apiPort}` },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stderr.on("data", () => {});
+  context.after(async () => {
+    if (child.exitCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null) await new Promise((resolve) => child.once("exit", resolve));
+    await new Promise((resolve) => honeypot.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const base = `http://127.0.0.1:${port}`;
+  await waitFor(`${base}/v1/status`);
+  await postJson(`${base}/v1/connect`, { sessionId: "disabled-session", clientId: "disabled-client", info: {} });
+  const status = await (await fetch(`${base}/v1/api-credentials/status?sessionId=disabled-session&clientId=disabled-client`)).json();
+  assert.equal(status.configured, false); assert.equal(status.disabled, true); assert.equal(status.source, null);
+  assert.doesNotMatch(JSON.stringify(status), /fake-token/);
+  for (const path of ["/v1/api-credentials/save", "/v1/api-credentials/test", "/v1/api-credentials/clear", "/v1/figma-rest/comments"]) {
+    const denied = await postJson(`${base}${path}`, { sessionId: "disabled-session", clientId: "disabled-client", token: "never-store", path: "/v1/files/fake-key/comments" });
+    assert.equal(denied.status, 403);
+  }
+  const proxy = spawn(process.execPath, [new URL("../server.mjs", import.meta.url).pathname, "--proxy-only"], {
+    env: { ...process.env, FIGMA_BRIDGE_PORT: String(port), FIGMA_BRIDGE_API_DISABLED: "1", FIGMA_CREDENTIAL_BACKEND: "memory", FIGMA_PREFERENCES_DIR: directory }, stdio: ["pipe", "pipe", "pipe"],
+  });
+  proxy.stderr.on("data", () => {});
+  context.after(async () => { if (proxy.exitCode === null) { proxy.kill("SIGTERM"); await new Promise((resolve) => proxy.once("exit", resolve)); } });
+  const rpc = rpcClient(proxy);
+  await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "api-disabled-test", version: "1" } });
+  rpc.notify("notifications/initialized");
+  const listed = await rpc.request("tools/list");
+  const names = listed.tools.map((tool) => tool.name);
+  for (const name of ["figma_comment_status", "figma_list_comments", "figma_post_comment", "figma_delete_comment"]) assert.ok(!names.includes(name));
+  assert.equal(apiRequests, 0);
+});
