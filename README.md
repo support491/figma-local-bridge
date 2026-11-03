@@ -8,6 +8,8 @@ This is the [support491 local fork](https://github.com/support491/figma-local-br
 
 See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
+For nontechnical users, the [marketing team guide for Claude Desktop](docs/marketing-quickstart.md) walks through downloading the project, installing dependencies, connecting Claude, and using Figma one step at a time.
+
 ## What it can do
 
 - Discover connected files, pages, artboards, selections, components, styles, and variables.
@@ -74,7 +76,34 @@ Keep the default endpoint: the plugin transport and manifest expect `localhost:3
 
 Each client runs a **stdio proxy** to the owner. Use the absolute path to your checkout and keep `--proxy-only`; closing the client then leaves the owner and Figma connections running.
 
-For Codex, the repository includes a [plugin manifest](.codex-plugin/plugin.json) and [MCP configuration](.mcp.json). For manual configuration, add the following to `~/.codex/config.toml` (see the [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)):
+#### Claude Desktop
+
+For the regular Claude Desktop app, add a local MCP server to `~/Library/Application Support/Claude/claude_desktop_config.json`. See the [local server setup guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers) for accessing this file. Merge this entry into any existing `mcpServers` object rather than replacing other servers:
+
+```json
+{
+  "mcpServers": {
+    "figma_local": {
+      "command": "/ABSOLUTE/PATH/TO/node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs",
+        "--proxy-only"
+      ],
+      "env": {
+        "FIGMA_BRIDGE_API_DISABLED": "1"
+      }
+    }
+  }
+}
+```
+
+Replace the executable placeholder with the result of `command -v node`, and the server placeholder with this checkout's absolute path. Completely quit Claude Desktop with **Command Q**, then reopen it. Check **+ → Connectors** in a regular chat for `figma_local` and its tools. Connection status is also under **Settings → Desktop app → Extensions → Manage → Local MCP servers**, or **Settings → Developer** in older layouts ([Claude's connection help](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)).
+
+Use a regular Claude Desktop chat for this local server. Adding `localhost:3846` as a remote custom connector does not connect to the local bridge. Local servers configured this way are unavailable in Claude's website and Cowork ([local versus remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)).
+
+#### Codex
+
+The repository includes a [plugin manifest](.codex-plugin/plugin.json) and [MCP configuration](.mcp.json). For manual configuration, add the following to `~/.codex/config.toml` (see the [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)):
 
 ```toml
 [mcp_servers.figma_local]
@@ -85,7 +114,9 @@ args = ["/ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs", "--proxy-only"]
 FIGMA_BRIDGE_API_DISABLED = "1"
 ```
 
-For Claude Code, use the included [plugin manifest](.claude-plugin/plugin.json), or register the server manually using its [stdio setup](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server):
+#### Claude Code
+
+Use the included [plugin manifest](.claude-plugin/plugin.json), or register the server manually using its [stdio setup](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server):
 
 ```sh
 claude mcp add --scope user --env FIGMA_BRIDGE_API_DISABLED=1 \
