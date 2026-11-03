@@ -4,7 +4,7 @@
 
 Inspect and edit the Figma Design files open in Figma Desktop through local MCP tools. A development plugin performs canvas operations through Figma's Plugin API, while a local Node.js server relays named, validated commands. Canvas work needs no personal access token, Figma REST API calls, or hosted Figma MCP connector.
 
-This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.2**. It adds a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
+This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.3**. It adds a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
 
 See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
@@ -27,6 +27,12 @@ The bridge accepts controlled commands; it does not execute JavaScript supplied 
 - **macOS** for the included `launchd` service installer. A foreground owner can also be started manually.
 
 The repository includes the bundled `dist/server.mjs`. A fresh clone can run it without installing npm dependencies. Install dependencies only when building or testing from source.
+
+## Claude Desktop staff package
+
+For staff using regular Claude Desktop on Mac, distribute the prebuilt `.mcpb` extension and companion Figma plugin, or the single staff-kit ZIP containing both parts and **START-HERE.html**. Follow the [staff installation guide](docs/claude-desktop.md). Staff do not need GitHub access, npm, a separate Node.js installation, or manual Claude JSON settings. The extension starts the local bridge with Claude and keeps API/comment access disabled.
+
+Maintainers can run `npm ci`, then `npm run package:desktop` to generate the packages under `build/claude-desktop/`. The `.mcpb` is an unsigned private distribution. It is separate from the proxy-only Codex/Claude Code plugin manifests; the existing persistent-service workflow below remains available.
 
 ## Quick start
 

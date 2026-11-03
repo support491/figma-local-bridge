@@ -1,0 +1,141 @@
+import { build } from "esbuild";
+import { zipSync } from "fflate";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const json = async (path) => JSON.parse(await readFile(path, "utf8"));
+
+async function dependencyNotices(inputs) {
+  const packages = new Map();
+  for (const input of Object.keys(inputs).filter((path) => path.includes("node_modules/"))) {
+    let directory = dirname(resolve(repository, input));
+    while (directory !== repository && directory !== dirname(directory)) {
+      try {
+        const info = await json(join(directory, "package.json"));
+        if (info.name && info.version) {
+          packages.set(directory, info);
+          break;
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      directory = dirname(directory);
+    }
+  }
+  const notices = ["Third party software included in the bundled bridge\n"];
+  for (const [directory, info] of [...packages].sort((a, b) => a[1].name.localeCompare(b[1].name))) {
+    const licenses = (await readdir(directory)).filter((name) => /^(licen[cs]e|notice)([.-].*)?$/i.test(name)).sort();
+    if (!licenses.length) throw new Error(`Missing license text for bundled dependency ${info.name}.`);
+    notices.push(`\n${"=".repeat(72)}\n${info.name} ${info.version}\nLicense: ${info.license ?? "See below"}\n`);
+    for (const license of licenses) notices.push(`\n${license}\n${await readFile(join(directory, license), "utf8")}\n`);
+  }
+  return notices.join("");
+}
+
+function archive(files) {
+  // Fixed timestamps and sorted entries make repeat builds byte-identical.
+  const entries = Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => [
+    name, [bytes, { mtime: new Date(2000, 0, 1), os: 3, attrs: 0o100644 << 16 }],
+  ]));
+  return zipSync(entries, { level: 9 });
+}
+
+function staffInstructions(extensionName) {
+  return `<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Figma Local Bridge</title>
+<style>body{max-width:760px;margin:48px auto;padding:0 24px;font:18px/1.6 system-ui,sans-serif;color:#171717}h1{font-size:32px;line-height:1.2}h2{margin-top:32px;font-size:24px}li{margin-bottom:12px}code{font-size:.9em;overflow-wrap:anywhere}blockquote{margin:18px 0 18px 24px}a{color:#174b83}</style>
+<h1>Install Figma Local Bridge</h1>
+<p>For Claude Desktop and Figma Desktop on a Mac. Install both parts once. You do not need Terminal, npm, a separate Node.js installation, or an API token.</p>
+<h2>1 Install the Claude extension</h2>
+<ol><li>Open Claude Desktop and go to <b>Settings → Desktop app → Extensions → Manage</b>. Older versions show <b>Settings → Extensions</b>.</li>
+<li>Open <b>Advanced settings</b>, choose <b>Install Extension…</b>, and select <code>${extensionName}</code> from this folder.</li>
+<li>Review and approve the installation. This is an unsigned private build; ask your Claude administrator if company policy blocks it.</li>
+<li>Start a regular chat. Under <b>+ → Connectors</b>, enable <b>Figma Local Bridge</b> if needed. Completely quit and reopen Claude if prompted.</li></ol>
+<h2>2 Install the Figma plugin</h2>
+<ol><li>Move the <b>figma-local-bridge</b> folder from this download to a permanent location, such as Documents. Keep it there.</li>
+<li>Open a Figma Design file in Figma Desktop. Choose <b>Plugins → Development → Import plugin from manifest…</b>.</li>
+<li>Select <b>manifest.json</b> inside the folder you moved. Click <b>Open</b>.</li>
+<li>Run <b>Plugins → Development → Local MCP Bridge</b>. Leave its panel open.</li>
+<li>Check that it says <b>Connected</b>. Choose <b>Expand → Connected files</b>, name the connection <b>Marketing Campaign</b>, paste the file link from Figma's Share menu, and choose <b>Save connection details</b>.</li></ol>
+<h2>3 Ask Claude to check the file</h2>
+<p>Paste this into a regular Claude Desktop chat. Replace the connection name if you chose a different one:</p>
+<blockquote>Use the Figma Local Bridge tools. First call figma_bridge_status, then figma_list_connections. Confirm the connection named "Marketing Campaign" and its current page. List the artboards. Do not change anything yet. Keep Figma API and comment access disabled.</blockquote>
+<p>After Claude confirms the correct file and page, give it one clear task and check the result in Figma.</p>
+<h2>Each day</h2><p>Open Claude, open the Figma file, run Local MCP Bridge, and leave the plugin panel open while you work. Ask Claude to confirm the file and page before editing.</p>
+<p>If you already have a manual Claude connection, disable that duplicate before enabling this extension. A separately managed background owner should be updated to this version by its administrator; this package does not replace it. This local connection is for regular Claude Desktop chats.</p>
+<p>If tools are missing, quit and reopen Claude. If Figma stays on Connecting, reopen the plugin and check that the extension is enabled. Send the exact error to Arsenio if it still fails.</p>
+<p>The bridge runs locally while Claude is open. API/comment access stays disabled. See <b>INSTALL.md</b> for upgrade details and the local security boundary.</p>
+<p><a href="https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop">Claude extension installation help</a></p></html>\n`;
+}
+
+export async function buildDesktopPackages(outputDirectory = join(repository, "build", "claude-desktop")) {
+  const packageInfo = await json(join(repository, "package.json"));
+  const manifest = await json(join(repository, "desktop-extension", "manifest.json"));
+  if (manifest.version !== packageInfo.version) throw new Error("Desktop manifest and package versions must match.");
+  const bundled = await build({
+    absWorkingDir: repository,
+    entryPoints: ["server.mjs"],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node20",
+    write: false,
+    metafile: true,
+    legalComments: "eof",
+    logLevel: "silent",
+  });
+  const bytes = async (path) => new Uint8Array(await readFile(join(repository, path)));
+  const text = (value) => new TextEncoder().encode(value);
+  const license = await bytes("LICENSE");
+  const install = await bytes("docs/claude-desktop.md");
+  const extension = archive({
+    "manifest.json": text(`${JSON.stringify(manifest, null, 2)}\n`),
+    "icon.png": await bytes("assets/icon.png"),
+    "server/launcher.mjs": await bytes("desktop-extension/launcher.mjs"),
+    "server/bridge.mjs": bundled.outputFiles[0].contents,
+    "LICENSE": license,
+    "THIRD_PARTY_NOTICES.txt": text(await dependencyNotices(bundled.metafile.inputs)),
+    "INSTALL.md": install,
+  });
+  const pluginFiles = {
+    "figma-local-bridge/manifest.json": await bytes("plugin/manifest.json"),
+    "figma-local-bridge/code.js": await bytes("plugin/code.js"),
+    "figma-local-bridge/ui.html": await bytes("plugin/ui.html"),
+    "figma-local-bridge/LICENSE": license,
+    "figma-local-bridge/INSTALL.md": install,
+  };
+  const plugin = archive(pluginFiles);
+  const extensionName = `figma-local-bridge-${packageInfo.version}.mcpb`;
+  const pluginName = `figma-local-bridge-figma-plugin-${packageInfo.version}.zip`;
+  const kitName = `figma-local-bridge-staff-kit-${packageInfo.version}.zip`;
+  const checksums = [[extensionName, extension], [pluginName, plugin]].map(([name, value]) => `${createHash("sha256").update(value).digest("hex")}  ${name}\n`).join("");
+  const instructions = text(staffInstructions(extensionName));
+  const kit = archive({
+    [extensionName]: extension,
+    ...pluginFiles,
+    "START-HERE.html": instructions,
+    "INSTALL.md": install,
+    "SHA256SUMS.txt": text(checksums.split("\n").filter((line) => line.endsWith(extensionName)).join("\n") + "\n"),
+  });
+  await mkdir(outputDirectory, { recursive: true });
+  await writeFile(join(outputDirectory, extensionName), extension);
+  await writeFile(join(outputDirectory, pluginName), plugin);
+  await writeFile(join(outputDirectory, kitName), kit);
+  await writeFile(join(outputDirectory, "INSTALL.md"), install);
+  await writeFile(join(outputDirectory, "START-HERE.html"), instructions);
+  await writeFile(join(outputDirectory, "SHA256SUMS.txt"), checksums + `${createHash("sha256").update(kit).digest("hex")}  ${kitName}\n`);
+  return { extension: join(outputDirectory, extensionName), plugin: join(outputDirectory, pluginName), kit: join(outputDirectory, kitName), version: packageInfo.version };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  if (args.length && (args.length !== 2 || args[0] !== "--output-dir")) throw new Error("Use --output-dir /path/to/output, or no arguments.");
+  const result = await buildDesktopPackages(args.length ? resolve(args[1]) : undefined);
+  console.log(`Built Claude Desktop extension: ${result.extension}`);
+  console.log(`Built companion Figma plugin: ${result.plugin}`);
+  console.log(`Built staff download kit: ${result.kit}`);
+}

@@ -35,7 +35,7 @@ function setPanelView(message) {
 
 let bridgeGeneration = 0;
 const bridgeUrl = "http://localhost:3846";
-const pluginVersion = "0.14.2-local.2";
+const pluginVersion = "0.14.2-local.3";
 const bridgeClientId = `figma-client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const mutatingCommands = new Set([
   "moveResizeReparent", "updateText", "setTextCase", "deleteNode", "duplicateNode",
