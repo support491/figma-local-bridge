@@ -8,7 +8,7 @@ This is the [support491 local fork](https://github.com/support491/figma-local-br
 
 See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
-For nontechnical users, start with the [marketing team guide for Claude Desktop](docs/marketing-quickstart.md).
+For nontechnical users, the [marketing team guide for Claude Desktop](docs/marketing-quickstart.md) walks through downloading the project, installing dependencies, connecting Claude, and using Figma one step at a time.
 
 ## What it can do
 
