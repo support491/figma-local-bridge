@@ -1,100 +1,228 @@
-# Local Figma MCP bridge
+# Figma Local Bridge
 
 <img src="assets/icon.png" alt="Figma Local Bridge icon" width="64" height="64">
 
-Use MCP tools to inspect and edit the Figma Design file open in Figma Desktop. A local Figma plugin performs canvas operations through the Plugin API; the MCP server relays named, validated commands to it. Canvas work needs no Figma API token. Comments are optional and use Figma's REST API.
+Inspect and edit the Figma Design files open in Figma Desktop through local MCP tools. A development plugin performs canvas operations through Figma's Plugin API, while a local Node.js server relays named, validated commands. Canvas work needs no personal access token, Figma REST API calls, or hosted Figma MCP connector.
 
-The bridge can read artboards and copy, inspect layout and design-system assets, audit text fit, export PNGs, and make controlled edits to native Figma nodes. This local build keeps multiple plugin connections and routes each operation to an explicit target. It never runs JavaScript supplied by an agent. See the [tool and workflow reference](docs/reference.md) for the full list.
+This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.2**. It adds a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
 
-## Persistent local setup
+See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
-This local build preserves the custom design-system and font tools and incorporates upstream 0.14.2. Run one HTTP owner independently of assistant sessions, then connect Claude Code and Codex as stdio proxies:
+## What it can do
 
-```sh
-npm run build
-node scripts/service.mjs install --preferences-dir /ABSOLUTE/PATH/TO/bridge-state
-node scripts/service.mjs start
-```
+- Discover connected files, pages, artboards, selections, components, styles, and variables.
+- Read ordered copy, update identified text layers, audit overflow and clipping, and export PNGs locally.
+- Create and edit native frames, sections, shapes, text, component instances, auto-layout, and bound colour tokens.
+- Inventory fonts, preview font replacements, and update local text styles or variable values with dry-run support.
+- Compose replacement layouts with progress tracking, required-image checks, recovery IDs, and verified archival of previous content.
+- Keep several Figma files connected while each assistant explicitly targets its own work.
 
-On macOS, the per-user launch agent starts the owner at login and restarts it after an exit. It listens only on `127.0.0.1:3846`. The installer uses a stable Homebrew Node path when available. `node scripts/service.mjs status`, `stop`, `restart`, and `uninstall` manage this service. Stop an earlier stdio-owned bridge before starting the service; the installer does not kill other processes.
+The bridge accepts controlled commands; it does not execute JavaScript supplied by an agent.
 
-After changing service paths or environment settings, run `stop`, then `install` with the desired options, then `start`. `restart` restarts the already loaded configuration; it does not reload a changed plist.
+## Requirements
 
-Configure each MCP client with `node /ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs --proxy-only`. The packaged MCP manifests use this mode. `FIGMA_BRIDGE_API_DISABLED=1` hides comment tools and disables optional API credentials and REST access; the local service sets it along with the existing disabled API endpoint and memory-only credential backend.
+- **Figma Desktop** with a Figma Design file open and permission to run a development plugin. The included manifest targets the Design editor.
+- **Node.js 20 or newer**, available to the MCP client and the background service.
+- An MCP client such as Codex or Claude Code.
+- **macOS** for the included `launchd` service installer. A foreground owner can also be started manually.
 
-Open Local MCP Bridge in each Figma file and leave each panel open. Enter its connection name and HTTPS Figma file link, then choose **Save connection details** once. The plugin stores a small, hidden, namespaced record with that Figma file and restores it before connecting the next time the plugin runs. Each file keeps its own details; no REST token or private Figma API access is needed. Clear both fields and save to forget the stored details.
-
-Copied or duplicated files can inherit this hidden record. Check and update the copy's file link before using a pinned assistant connection. The supplied link is remembered metadata, not independently verified file identity.
-
-Call `figma_list_connections`, verify the intended file/page, and pass a runtime ID, `file:FILE_KEY`, or `name:Saved file name` as `targetId`. For example, `targetId: "name:Hims Design"` selects that saved connection name. Names match exactly and must be unique among connected files; missing, stale or ambiguous matches fail before dispatch. Discovery returns `namedTargetRefs` and `stableTargetRef`. A per-call target overrides only that call, preserving each proxy’s `FIGMA_BRIDGE_TARGET` default and the other assistant’s file. File references use the saved HTTPS link and survive plugin restarts.
-
-The panel's connected-files picker shows each target, its status, and a copyable target ID. Selecting a row does not change a shared assistant default. **Open file** opens its supplied HTTPS link; it does not launch the bridge in a file that has no running plugin. Use Figma's desktop-link preference when you want those links to open in Desktop.
-
-The panel starts compact with the saved file name, connection state and current activity. Choose **Expand** for connection controls and **Compact** to return to the dock. Switching views does not reconnect; the preference is remembered on this device.
-
-Commands and composite calls are serialized per target. Separate targets can progress independently. Avoid opening duplicate bridge runtimes for the same underlying file: without reliable file identity, leases protect plugin instances, not duplicate windows of the same document.
-
-## Bounded text audits
-
-`figma_audit_text_overflow` measures up to 40 text nodes, visits up to 400 nodes, and uses a cooperative 1-second budget per call by default. It yields between small chunks so Figma can respond. Each result contains this batch’s findings, cumulative `totals`, `complete`, and `nextCursor`. If incomplete, pass the cursor with the same target, root `nodeId`, and `includeHidden`; stop by not requesting another batch. Keep previous batches’ findings and never interpret partial zero-warning results as a completed clean audit.
-
-Cursors expire after five minutes or a plugin restart and are consumed once. Start fresh after edits. Budgets are configurable within bounded limits; a single Figma font or measurement operation cannot be interrupted mid-call. Packaged copy updates, compositions and reviews also report incomplete verification when their first audit batch is partial. Resume the audit, not the edits.
+The repository includes the bundled `dist/server.mjs`. A fresh clone can run it without installing npm dependencies. Install dependencies only when building or testing from source.
 
 ## Quick start
 
-1. Clone this repository or download a release ZIP. Node 20 or newer runs the included `dist/server.mjs`; a build is not required for the committed bundle.
-2. In Figma Desktop, choose **Plugins → Development → Import plugin from manifest…** and select [`plugin/manifest.json`](plugin/manifest.json).
-3. Start the persistent local service above, then configure your MCP client to run `node /ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs --proxy-only`. For Codex, install this folder as a plugin or add:
+### 1. Clone this fork
 
-   ```toml
-   [mcp_servers.figma_local]
-   command = "node"
-   args = ["/ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs", "--proxy-only"]
-   ```
+```sh
+mkdir -p "$HOME/Developer"
+git clone https://github.com/support491/figma-local-bridge.git "$HOME/Developer/figma-local-bridge"
+cd "$HOME/Developer/figma-local-bridge"
+```
 
-4. Open the target Figma file and run **Plugins → Development → Local MCP Bridge**. Leave its status panel open.
-5. Call `figma_list_connections`. Check the expected connection label and page, then pass its `targetId` to canvas calls.
+If that directory already exists, choose a different destination to keep the existing checkout. Use the new checkout's absolute path in all client and plugin settings.
 
-Claude Code can use the same server with `claude mcp add --scope user figma-local -- node /ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs --proxy-only`. The repository also includes Codex and Claude plugin manifests and the [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md).
+### 2. Import the Figma plugin
+
+In Figma Desktop, choose **Plugins → Development → Import plugin from manifest…** and select [`plugin/manifest.json`](plugin/manifest.json) from your checkout.
+
+### 3. Start one persistent owner
+
+On macOS, run these commands from the checkout:
+
+```sh
+node scripts/service.mjs install
+node scripts/service.mjs start
+node scripts/service.mjs status
+```
+
+The per-user launch agent starts at login and restarts after an exit. It runs `dist/server.mjs --http-owner` on **127.0.0.1:3846**, independently of assistant sessions. The service disables Figma API/comment access, clears token/file-key environment values, and uses memory-only credential storage.
+
+Only one owner should use this endpoint. Stop an earlier bridge owner before starting the service; the installer does not kill other processes. The service label is shared across checkouts, so installing from a second clone replaces the installed service paths. To inspect the proposed configuration without changing the service, run:
+
+```sh
+node scripts/service.mjs install --dry-run
+```
+
+For a foreground owner instead of the macOS service, keep this process running in a terminal:
+
+```sh
+FIGMA_BRIDGE_API_DISABLED=1 node dist/server.mjs --http-owner
+```
+
+Keep the default endpoint: the plugin transport and manifest expect `localhost:3846`.
+
+### 4. Connect your MCP client
+
+Each client runs a **stdio proxy** to the owner. Use the absolute path to your checkout and keep `--proxy-only`; closing the client then leaves the owner and Figma connections running.
+
+For Codex, the repository includes a [plugin manifest](.codex-plugin/plugin.json) and [MCP configuration](.mcp.json). For manual configuration, add the following to `~/.codex/config.toml` (see the [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)):
+
+```toml
+[mcp_servers.figma_local]
+command = "node"
+args = ["/ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs", "--proxy-only"]
+
+[mcp_servers.figma_local.env]
+FIGMA_BRIDGE_API_DISABLED = "1"
+```
+
+For Claude Code, use the included [plugin manifest](.claude-plugin/plugin.json), or register the server manually using its [stdio setup](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server):
+
+```sh
+claude mcp add --scope user --env FIGMA_BRIDGE_API_DISABLED=1 \
+  --transport stdio figma-local -- \
+  node /ABSOLUTE/PATH/TO/figma-local-bridge/dist/server.mjs --proxy-only
+```
+
+Set `FIGMA_BRIDGE_API_DISABLED=1` in **every client**, as well as the owner. A proxy advertises tools from its own environment; disabling the owner alone does not hide comment tools in the client. Both packaged MCP configurations already include this setting.
+
+Restart the client's MCP process after adding or changing its configuration. If the app cannot find `node`, use its absolute executable path.
+
+### 5. Open and verify the target file
+
+1. Open the intended Figma Design file and run **Plugins → Development → Local MCP Bridge**. Leave its panel open.
+2. Choose **Expand**, enter a connection name and the file's HTTPS Figma link, then choose **Save connection details**.
+3. Call `figma_bridge_status` first. Verify bridge/plugin versions, connection health, and the intended file and page.
+4. Call `figma_list_connections` to discover the connection's target references. Pass the chosen `targetId` to canvas calls.
+
+If no plugin is connected, run **Local MCP Bridge** in the target desktop file and keep its panel open. The local status page is available at [localhost:3846](http://localhost:3846/).
+
+## Work with multiple files
+
+Run the plugin in each file you want connected. Each file remembers its connection name and supplied HTTPS link in a small, private, namespaced document record; saving these details does not change visible canvas nodes. Clear both fields and save to forget them.
+
+`figma_list_connections` returns runtime IDs and, when available, `namedTargetRefs` and `stableTargetRef`. Use a returned reference as `targetId`:
+
+| Reference | Behaviour |
+| --- | --- |
+| Runtime `targetId` | Identifies one running plugin instance; rediscover it after a plugin restart. |
+| `name:Design Library` | Matches an exact saved connection name or document name; it must be unique among operational connections. |
+| `file:FILE_KEY` | Uses the supplied HTTPS file link and can survive plugin restarts. |
+
+Names are exact matches, not fuzzy searches or page names. Missing, stale, or ambiguous references fail before dispatch. Selecting a Figma window or a row in the panel does not select an assistant's target.
+
+A client may set `FIGMA_BRIDGE_TARGET` in its environment as a default. A per-call `targetId` overrides only that call, preserving the other client's default. Commands and composite calls are serialized per target; separate targets can progress independently.
+
+The supplied file link is remembered metadata, not independently verified file identity. Duplicated files can inherit it, so update a copy's link before using a stable target. Avoid duplicate plugin runtimes for the same physical file: leases protect plugin instances, not every window of a document.
+
+The **Connected files** picker lists running connections. **Open file** opens a saved link but does not launch the bridge in that file. **Compact** and **Expand** change only the panel view and preserve the connection.
 
 ## Review an artboard or spread
 
-Call `figma_list_artboards` to get IDs, then call `figma_prepare_review` with one to eight IDs in reading order. For example:
+After verifying the target, call `figma_list_artboards` with its `targetId`. Then call `figma_prepare_review` with one to eight returned artboard IDs in reading order. Replace the sample name and IDs below with discovered values:
 
 ```json
-{"nodeIds":["1:2","1:3"],"auditOverflow":true}
+{
+  "targetId": "name:Design Library",
+  "nodeIds": ["1:2", "1:3"],
+  "auditOverflow": true,
+  "detail": "summary"
+}
 ```
 
-The result contains ordered copy, optional overflow audits, and local PNG paths under `~/Pictures/Figma MCP Exports` by default. It leaves no document edits. Use the individual read and audit tools for copy-only work that does not need images.
+The result contains ordered copy, overflow-audit results, and local PNG paths under `~/Pictures/Figma MCP Exports` by default. It leaves no document edits. A two-artboard review gathers copy and audits in one packaged plugin operation, followed by two exports. Use structured reads and audits for copy-only work that does not need images.
 
-In **0.13.1**, the review call gathers copy and overflow results in one packaged plugin operation, followed by one PNG export command per artboard. A two-artboard review with audits uses three plugin commands instead of five; the MCP tool name and output shape stay the same. See the [changelog](CHANGELOG.md).
+An audit may be incomplete even when its current batch reports no warnings. Continue it before claiming verification.
+
+### Continue a bounded text audit
+
+`figma_audit_text_overflow` defaults to at most **40 text nodes**, **400 traversal nodes**, and a cooperative **1-second budget** per call. Each result contains the current batch's findings, cumulative `totals`, `complete`, and `nextCursor`.
+
+When `complete` is false, pass `nextCursor` as `cursor` with the same target, current page, root `nodeId`, and `includeHidden`. Keep findings from every batch. Stop by not requesting another batch.
+
+Cursors are single-use and expire after five minutes or a plugin restart. Start fresh after document edits. Budgets are bounded and cooperative; one native Figma font or measurement operation cannot be interrupted mid-call. Packaged reviews, copy updates, and compositions also report incomplete verification when their first audit batch is partial. Resume the audit, not the edits.
 
 ## Track a long composition
 
-Use `figma_start_composition` when a board may take a while. It returns an operation ID immediately; `figma_operation_status` reports the current phase and percentage, then the verified result. Reusing the same operation ID resumes that request instead of creating a duplicate.
+Use `figma_start_composition` with an explicit target when a board may take a while. It returns an operation ID immediately; `figma_operation_status` reports progress and the final result. Reuse the same operation ID with the same target and inputs to recover that request.
 
-If a response is lost, the error includes the recovery ID. Check it before retrying. Operation history lives in memory; after a bridge restart, inspect the document if that ID is no longer known.
+If a response is lost, check the recovery ID from the error before retrying. Do not start a duplicate while an operation is queued, running, or has an unknown outcome. History lives in memory; after a bridge restart, inspect the document if the ID is no longer known.
 
-Composed frames and rectangles can copy an existing Figma image fill with `imageSourceNodeId`. Mark an expected image area with `imageRequired: true`; a missing, hidden or transparent required image makes `verificationComplete` false and prevents the previous layout from being archived.
+Composed frames and rectangles can reuse an existing image fill with `imageSourceNodeId`. Set `imageRequired: true` where an image is necessary. Missing, hidden, or transparent required images make `verificationComplete` false and prevent the previous layout from being archived.
 
-When an inherited CROP image is copied into a differently proportioned area, it switches to centered FILL to keep its proportions. Explicit crop modes and transforms remain your choice. The result reports automatic adjustments so you can review the focal point.
+Copying an inherited CROP image into a differently proportioned area switches it to centered FILL. Explicit crop modes and transforms are preserved. Review reported adjustments and the final focal point.
 
-## Update or test
+## Service management and local data
 
-After updating server code, rebuild and restart the background service. Existing upgraded plugins reconnect automatically. After updating plugin code, close and run the development plugin again in each file. Saved connection details restore automatically; when upgrading from the earlier runtime-only version, enter and save each file's details once. Restart the `figma_local` MCP process in your client when tool schemas or client configuration change. Check `figma_bridge_status`: both bridge and plugin should report the same version. The local status page is at [localhost:3846](http://localhost:3846/).
+Run `node scripts/service.mjs ACTION` from the checkout:
 
-To build and run local checks from source:
+| Action | Purpose |
+| --- | --- |
+| `install` | Write the launch-agent configuration using this checkout and a stable Homebrew Node path when available. |
+| `start` | Load the installed service if it is not already loaded. |
+| `status` | Report the loaded service's state and process ID. |
+| `restart` | Restart the currently loaded configuration. |
+| `stop` | Unload the service. |
+| `uninstall` | Unload it and remove its launch-agent plist. |
 
-```bash
+The plist lives at `~/Library/LaunchAgents/com.figma-local-bridge.owner.plist`; logs are in `~/Library/Logs/FigmaLocalBridge/owner.stdout.log` and `owner.stderr.log`. Uninstalling the service does not remove the checkout, preferences, or exported PNGs.
+
+Preferences default to `~/.figma-local-bridge`. To reuse a different store, pass `--preferences-dir /ABSOLUTE/PATH/TO/bridge-state` during installation and set `FIGMA_PREFERENCES_DIR` to that same directory in **every client's environment**. Preference tools run in the client process, so matching paths matter. Preserve an existing store when updating or moving the checkout. Set `FIGMA_EXPORT_DIR` in each exporting client's environment to change its PNG destination.
+
+After changing service paths or settings, use **stop → install → start**. `restart` does not reload a changed plist. The installer also accepts `--node /ABSOLUTE/PATH/TO/node` and `--dry-run` for configuration inspection.
+
+## Build, update, and test
+
+For source development, install the locked dependencies:
+
+```sh
 npm ci
-npm run build
 npm run check
 ```
 
-For a live check, run `figma_prepare_review` on two known artboards and confirm ordered copy, two PNG files, and two audits. The packaged read should appear as one plugin activity, followed by two exports. A live Figma-file check is separate from the local automated tests.
+`npm ci` runs the package's `prepare` script, which builds `dist/server.mjs`. After later server edits, rebuild explicitly:
 
-## Optional comments and safety
+```sh
+npm run build
+```
 
-Canvas tools stay local to `127.0.0.1`. The bridge accepts separately targeted Figma plugins and does not execute agent-written JavaScript. SVG imports reject scripts and event handlers. This is a trusted-local-computer boundary, not strong authentication against other local processes. Other processes running as your OS user can access the bridge while it is open.
+After pulling or building an update:
 
-This user's service and client configurations intentionally disable comment/API access. Canvas work does not require enabling it. The inherited optional-comment implementation is retained for compatibility but is blocked when `FIGMA_BRIDGE_API_DISABLED=1`.
+1. Restart the background service to load the updated server bundle. Use **stop → install → start** instead if its paths or settings changed.
+2. If plugin code changed, close and run the development plugin again in each file. Saved connection details restore automatically; older runtime-only installations need them saved once.
+3. Restart the MCP process in each client when tool schemas or client settings change.
+4. Call `figma_bridge_status` and confirm the bridge and each plugin report the same version.
+
+`npm run check` performs syntax checks and automated server, plugin, credential, panel, and service tests. These are separate from live Figma verification. For a live review check, use two known artboards and confirm ordered copy, two PNGs, and completed audits, continuing any partial batches.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Proxy cannot reach the owner | Run `node scripts/service.mjs status`, check the service logs, and open the local status page. A `--proxy-only` client never starts an owner. |
+| Owner cannot bind to port 3846 | Another process may own the endpoint. Identify and stop the previous owner before starting this service. |
+| No connected files | Run **Local MCP Bridge** in the intended Figma Desktop file and leave the panel open. Opening a saved link alone does not start the plugin. |
+| Target is missing or ambiguous | Refresh `figma_list_connections`; use an exact unique reference or the returned runtime ID, and verify the file/page. |
+| Bridge/plugin versions differ | Restart the owner and reload the development plugin; restart client MCP processes if their schemas changed. |
+| Review is not verified | Continue every incomplete audit cursor and inspect the cumulative findings and required-image warnings. |
+| Mutation timed out or its outcome is unknown | Check its operation status and inspect the affected document before retrying. See the [recovery guidance](docs/reference.md#concurrency-and-interrupted-calls). |
+| Comment tools appear unexpectedly | Set `FIGMA_BRIDGE_API_DISABLED=1` in the client environment and restart its MCP process. Keep API access disabled in the owner too. |
+
+## Local boundary and API access
+
+The provided service and packaged MCP clients disable Figma API/comment tools with `FIGMA_BRIDGE_API_DISABLED=1`. This hides comment tools, blocks credential and REST routes, and bypasses credential lookup. No token is needed for canvas work. Keep the service's disabled API endpoint and credential settings in place; do not add a personal access token or enable API access as a canvas troubleshooting step.
+
+The inherited optional-comment implementation remains in the source for separately authorized installations. It uses Figma REST credentials and is outside this fork's documented local setup.
+
+The bridge binds to loopback, validates commands, and rejects scripts and event handlers in SVG imports. It assumes a trusted local computer and does not provide secret pairing or strong authentication against other local processes. See the [security model](docs/reference.md#security-model) for the boundary and limitations.
+
+Licensed under the [MIT License](LICENSE).
