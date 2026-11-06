@@ -1,7 +1,7 @@
-figma.showUI(__html__, { width: 360, height: 190, title: "Local MCP Bridge" });
+figma.showUI(__html__, { width: 420, height: 700, title: "Local MCP Bridge" });
 
 const panelPreferenceKey = "figma_local_bridge.panel_compact.v1";
-let panelCompact = true;
+let panelCompact = false;
 let panelViewRevision = 0;
 let panelViewLoaded = false;
 let panelSaveQueue = Promise.resolve();
@@ -20,7 +20,7 @@ async function restorePanelView() {
   // A click made while storage was loading is newer than the saved preference.
   if (revision !== panelViewRevision) return;
   if (typeof saved === "boolean") panelCompact = saved;
-  resizeBridgePanel(360);
+  resizeBridgePanel(700);
   figma.ui.postMessage({ type: "bridge-view", compact: panelCompact });
 }
 
@@ -28,14 +28,14 @@ function setPanelView(message) {
   if (typeof message.compact !== "boolean") return;
   panelViewRevision += 1;
   panelCompact = message.compact;
-  resizeBridgePanel(Number.isInteger(message.height) && message.height >= 360 && message.height <= 900 ? message.height : 360);
+  resizeBridgePanel(Number.isInteger(message.height) && message.height >= 360 && message.height <= 900 ? message.height : 700);
   const value = panelCompact;
   panelSaveQueue = panelSaveQueue.then(() => figma.clientStorage?.setAsync(panelPreferenceKey, value)).catch(() => {});
 }
 
 let bridgeGeneration = 0;
 const bridgeUrl = "http://localhost:3846";
-const pluginVersion = "0.14.2-local.2";
+const pluginVersion = "0.14.2-local.4";
 const bridgeClientId = `figma-client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const mutatingCommands = new Set([
   "moveResizeReparent", "updateText", "setTextCase", "deleteNode", "duplicateNode",
@@ -229,6 +229,7 @@ function bridgeContext() {
   };
 }
 function pollQuery(sessionId) {
+  publishStaffContext();
   const context = bridgeContext();
   const params = { sessionId, pageId: context.pageId, pageName: context.pageName, selectionCount: String(context.selectionCount) };
   return `?${Object.entries(params).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join("&")}`;
@@ -238,6 +239,7 @@ function isRuntimeCallbackError(error) { return /invoke callback with invalid id
 function reconnectDelay(failures) { return Math.min(2_000 * 2 ** Math.max(0, failures - 1), 30_000); }
 function terminalHeartbeatError(error) { return isReplacementError(error) || isRuntimeCallbackError(error) || error?.status === 401; }
 function postHeartbeat(sessionId) {
+  publishStaffContext();
   if (heartbeatRequests.has(sessionId)) return heartbeatRequests.get(sessionId);
   const request = bridgeRequest("/v1/heartbeat", {
     method: "POST", headers: { "content-type": "application/json" },
@@ -3127,16 +3129,99 @@ async function execute(name, input, reportProgress = async () => {}) {
   throw new Error(`Unsupported command: ${name}`);
 }
 
+let staffWorkingCopyIds = [];
+let staffWorkingCopyPageId = null;
+let lastStaffContext = "";
+
+function staffNodeSummary(node) { return { id: node.id, name: node.name, type: node.type }; }
+
+function publishStaffContext(force = false) {
+  const page = figma.currentPage;
+  const selection = page.selection.map(staffNodeSummary);
+  const selected = new Set(selection.map((node) => node.id));
+  if (page.id !== staffWorkingCopyPageId || selected.size !== staffWorkingCopyIds.length || !staffWorkingCopyIds.every((id) => selected.has(id))) {
+    staffWorkingCopyIds = [];
+    staffWorkingCopyPageId = null;
+  }
+  const context = {
+    type: "staff-context", pluginVersion, targetId: bridgeClientId,
+    documentName: figma.root.name || bridgeMetadata.documentName || bridgeMetadata.label || "Current Figma file",
+    pageId: page.id, pageName: page.name, selection, workingCopyIds: [...staffWorkingCopyIds],
+  };
+  const serialized = JSON.stringify(context);
+  if (force === true || serialized !== lastStaffContext) {
+    lastStaffContext = serialized;
+    figma.ui.postMessage(context);
+  }
+}
+
+function copyStaffSelection(message) {
+  if (bridgeCommandInFlight || bridgePhase !== "connected" || !bridgeSessionId) throw new Error("Wait until the connection is ready and the current task has finished, then try again.");
+  const page = figma.currentPage;
+  const originals = [...page.selection];
+  const expectedIds = new Set(Array.isArray(message.nodeIds) ? message.nodeIds : []);
+  if (message.pageId !== page.id || expectedIds.size !== originals.length || !originals.every((node) => expectedIds.has(node.id))) {
+    throw new Error("Your page or selection changed. Select the designs again and choose Work on a copy.");
+  }
+  if (!originals.length) throw new Error("Select one or more whole artboards or sections in Figma first.");
+  if (originals.length > 20) throw new Error("Select no more than 20 artboards or sections at a time.");
+  if (originals.some((node) => node.parent !== page || typeof node.clone !== "function")) {
+    throw new Error("Select whole artboards or sections on the page, rather than layers inside them. This keeps the original layout unchanged.");
+  }
+  const bounds = originals.map((node) => ({ x: node.x, width: node.width }));
+  if (bounds.some((node) => !Number.isFinite(node.x) || !Number.isFinite(node.width))) throw new Error("The selected designs cannot be positioned. Select whole artboards and try again.");
+  const offset = Math.max(...bounds.map((node) => node.x + node.width)) - Math.min(...bounds.map((node) => node.x)) + 80;
+  const copies = [];
+  // No awaits: local copying cannot interleave with an assistant's canvas command.
+  bridgeCommandInFlight = true;
+  try {
+    figma.commitUndo();
+    for (const node of originals) {
+      const copy = node.clone();
+      copies.push(copy);
+      copy.name = `${node.name} — Working copy`;
+      copy.x = node.x + offset;
+      copy.y = node.y;
+    }
+    page.selection = copies;
+    figma.commitUndo();
+  } catch (error) {
+    let cleanupFailed = false;
+    for (const copy of copies.reverse()) {
+      try { if (!copy.removed) copy.remove(); } catch { cleanupFailed = true; }
+    }
+    try { page.selection = originals; } catch { cleanupFailed = true; }
+    throw new Error(cleanupFailed
+      ? "The copy could not be completed and some copies could not be removed. Inspect the page and use Figma Undo before trying again."
+      : `No working copy was kept. ${errorMessage(error)}`);
+  } finally { bridgeCommandInFlight = false; }
+  staffWorkingCopyIds = copies.map((node) => node.id);
+  staffWorkingCopyPageId = page.id;
+  try { figma.viewport.scrollAndZoomIntoView(copies); } catch { /* Copying succeeded even if the viewport cannot move. */ }
+  publishStaffContext();
+  return { type: "staff-copy-result", createdNodes: copies.map(staffNodeSummary), pageId: page.id, pageName: page.name };
+}
+
+figma.on?.("selectionchange", publishStaffContext);
+figma.on?.("currentpagechange", publishStaffContext);
+
 figma.ui.onmessage = async (message) => {
   if (!message || typeof message !== "object") return;
   if (message.type === "bridge-http-response") { finishTransportRequest(message); return; }
   if (message.type === "start" || message.type === "retry") {
     void restorePanelView();
+    publishStaffContext();
     if (message.transport === "ui-http-v1") bridgeTransport = "ui-http-v1";
     if (!bridgeCommandInFlight) startBridge();
     return;
   }
   if (message.type === "panel-view") { setPanelView(message); return; }
+  if (message.type === "staff-refresh-context") { publishStaffContext(true); return; }
+  if (message.type === "staff-copy-selection") {
+    try { figma.ui.postMessage(copyStaffSelection(message)); }
+    catch (error) { figma.ui.postMessage({ type: "staff-error", error: errorMessage(error) }); publishStaffContext(); }
+    return;
+  }
   if (message.type === "set-metadata") {
     const value = { label: message.label, fileUrl: message.fileUrl };
     metadataSaveQueue = metadataSaveQueue.then(() => saveBridgeMetadata(value)).catch((error) => {

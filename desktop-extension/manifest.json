@@ -1,0 +1,43 @@
+{
+  "manifest_version": "0.3",
+  "name": "figma-local-bridge",
+  "display_name": "Figma Local Bridge",
+  "version": "0.14.2-local.4",
+  "description": "Read and edit your open Figma Design files from Claude Desktop.",
+  "long_description": "Connect Claude Desktop to Figma Desktop on this computer. The bridge starts with Claude; no separate Node.js installation, npm commands, API token, or background service is needed. Install the companion Figma plugin once, then run it in each design file and keep its panel open. Canvas edits happen in your real Figma file. Figma API and comment access stay disabled. Closing Claude stops a bridge it owns; an existing separately managed owner is left running.",
+  "author": {
+    "name": "Arsenio Aaron",
+    "url": "https://github.com/support491"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/support491/figma-local-bridge"
+  },
+  "homepage": "https://github.com/support491/figma-local-bridge",
+  "documentation": "https://github.com/support491/figma-local-bridge/blob/main/docs/claude-desktop.md",
+  "support": "https://github.com/support491/figma-local-bridge/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/launcher.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/launcher.mjs"],
+      "env": {
+        "FIGMA_BRIDGE_HOST": "127.0.0.1",
+        "FIGMA_BRIDGE_PORT": "3846",
+        "FIGMA_BRIDGE_API_DISABLED": "1",
+        "FIGMA_CREDENTIAL_BACKEND": "memory"
+      }
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["figma", "design", "marketing", "local"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20"
+    }
+  }
+}

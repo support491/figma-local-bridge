@@ -4,7 +4,7 @@
 
 Inspect and edit the Figma Design files open in Figma Desktop through local MCP tools. A development plugin performs canvas operations through Figma's Plugin API, while a local Node.js server relays named, validated commands. Canvas work needs no personal access token, Figma REST API calls, or hosted Figma MCP connector.
 
-This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.2**. It adds a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
+This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.4**. It adds a Claude Desktop staff package and guided task panel, a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
 
 See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
@@ -27,6 +27,16 @@ The bridge accepts controlled commands; it does not execute JavaScript supplied 
 - **macOS** for the included `launchd` service installer. A foreground owner can also be started manually.
 
 The repository includes the bundled `dist/server.mjs`. A fresh clone can run it without installing npm dependencies. Install dependencies only when building or testing from source.
+
+## Claude Desktop staff package
+
+For staff using regular Claude Desktop on Mac, distribute the prebuilt `.mcpb` extension and companion Figma plugin, or the single staff-kit ZIP containing both parts and **START-HERE.html**. Follow the [staff installation guide](docs/claude-desktop.md). Staff do not need GitHub access, npm, a separate Node.js installation, or manual Claude JSON settings. The extension starts the local bridge with Claude and keeps API/comment access disabled.
+
+The welcome screen shows the current file and page. Staff choose a marketing task and use **Copy instructions for Claude** to prepare a prompt with the intended connection and selection. **Work on a copy** duplicates the selection before editing. **Check connection** explains connection and version problems, and **Copy support details** prepares a report without design content, file URLs, or local paths. Technical references remain in Advanced settings.
+
+For Claude Personal and Figma Professional, use the downloadable kit and one shared team download folder. The [team deployment guide](docs/team-deployment.md) covers releases, updates, rollback, and optional organization publishing if eligible plans are available. The [staff pilot checklist](docs/staff-pilot.md) records two first-time installations in the real apps.
+
+Maintainers can run `npm ci`, `npm run check`, then `npm run package:desktop` to generate matching packages under `build/claude-desktop/`. Builds reject mismatched versions and include **RELEASE.json**, hashes, and the administrator/pilot guides. Pull requests run package checks; pushing a matching `vVERSION` tag runs tests and publishes the paired downloads in one GitHub release. The `.mcpb` remains unsigned. It is separate from the proxy-only Codex/Claude Code plugin manifests; the existing persistent-service workflow below remains available.
 
 ## Quick start
 
@@ -100,7 +110,7 @@ Restart the client's MCP process after adding or changing its configuration. If 
 ### 5. Open and verify the target file
 
 1. Open the intended Figma Design file and run **Plugins → Development → Local MCP Bridge**. Leave its panel open.
-2. Choose **Expand**, enter a connection name and the file's HTTPS Figma link, then choose **Save connection details**.
+2. Confirm the current file/page in the welcome screen. Optionally open **Advanced settings → Connected files** to save a connection name and the file's HTTPS link.
 3. Call `figma_bridge_status` first. Verify bridge/plugin versions, connection health, and the intended file and page.
 4. Call `figma_list_connections` to discover the connection's target references. Pass the chosen `targetId` to canvas calls.
 
@@ -124,7 +134,7 @@ A client may set `FIGMA_BRIDGE_TARGET` in its environment as a default. A per-ca
 
 The supplied file link is remembered metadata, not independently verified file identity. Duplicated files can inherit it, so update a copy's link before using a stable target. Avoid duplicate plugin runtimes for the same physical file: leases protect plugin instances, not every window of a document.
 
-The **Connected files** picker lists running connections. **Open file** opens a saved link but does not launch the bridge in that file. **Compact** and **Expand** change only the panel view and preserve the connection.
+The **Connected files** picker in Advanced settings lists running connections. **Open file** opens a saved link but does not launch the bridge in that file. Panel view controls preserve the connection. The staff prompt always targets the file containing its own plugin panel; inspecting another connection in Advanced settings does not redirect that prompt.
 
 ## Review an artboard or spread
 

@@ -8,3 +8,6 @@ LOCAL-SETUP.md
 local-verify.py
 restore/
 *.before-*
+
+# Generated staff distributions.
+build/
