@@ -1,0 +1,65 @@
+name: Release staff package
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check paired versions and tag
+        run: node scripts/check-release.mjs "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - run: npm run check
+      - run: npm run package:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staff-package-release
+          path: build/claude-desktop/
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: staff-package-release
+          path: release
+      - name: Verify downloaded artifacts
+        working-directory: release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Publish one coordinated release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Download the staff-kit ZIP for both the Claude Desktop extension and matching Figma plugin. Unzip it and open START-HERE.html.
+
+          Mac only. This private build is unsigned. Install both parts from this release; privately distributed Claude extensions require manual updates. Administrators: read TEAM-DEPLOYMENT.md and complete STAFF-PILOT.md before a wider rollout.
+
+          RELEASE.json identifies the paired packages. SHA256SUMS.txt verifies the release archives.
+          NOTES
+          gh release create "$RELEASE_TAG" --verify-tag --title "Figma Local Bridge $RELEASE_TAG" --notes-file release-notes.md \
+            release/*.mcpb release/*.zip release/START-HERE.html release/INSTALL.md \
+            release/TEAM-DEPLOYMENT.md release/STAFF-PILOT.md release/RELEASE.json release/SHA256SUMS.txt

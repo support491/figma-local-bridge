@@ -15,7 +15,7 @@ function loadPanel(clientStorage) {
 test("panel restores a local expanded preference without connection or document writes", async () => {
   const panel = loadPanel({ getAsync: async (key) => { assert.equal(key, "figma_local_bridge.panel_compact.v1"); return false; } });
   await panel.restorePanelView();
-  assert.deepEqual(panel.sizes, [[420, 360]]);
+  assert.deepEqual(panel.sizes, [[420, 700]]);
   assert.equal(panel.messages[0].type, "bridge-view");
   assert.equal(panel.messages[0].compact, false);
 });
@@ -49,10 +49,10 @@ test("rapid toggles persist in order and compact mode ignores expanded resize re
 test("storage failure keeps panel usable and malformed sizes stay bounded", async () => {
   const panel = loadPanel({ getAsync: async () => { throw Error("unavailable"); }, setAsync: async () => { throw Error("unavailable"); } });
   await panel.restorePanelView();
-  assert.equal(panel.messages[0].compact, true);
+  assert.equal(panel.messages[0].compact, false);
   panel.setPanelView({ compact: false, height: 100000 });
   panel.resizeBridgePanel(-1);
   panel.resizeBridgePanel(400.5);
   await panel.settle();
-  assert.deepEqual(panel.sizes, [[360, 190], [420, 360]]);
+  assert.deepEqual(panel.sizes, [[420, 700], [420, 700]]);
 });

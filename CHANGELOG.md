@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.2-local.4 — 2026-11-05
+
+- Added a staff view with the current file/page, guided marketing tasks, ready-to-copy Claude instructions, connection checks, version mismatch guidance, and support details that omit file content and identifiers.
+- Added Work on a copy for selected whole artboards or sections, with a separate Figma undo step, rollback on failed copying, and prompts scoped to the selected copies. Selection and page changes refresh the prompt context.
+- New installations open the staff view; a compact view remains available and existing view preferences are preserved. Technical connection controls live under Advanced settings.
+- Added coordinated release validation, automated checks and tagged release packaging, paired archive metadata/checksums, deployment instructions for Claude Personal and Figma Professional, and a two-person staff pilot checklist.
+- Kept the desktop package local, Mac-only, and API/comment access disabled. Private file updates remain manual; organization publishing and signing require the corresponding accounts and credentials.
+
 ## 0.14.2-local.3 — 2026-11-03
 
 - Added a Claude Desktop `.mcpb` staff extension that includes the compiled bridge, uses Claude's Node runtime, and starts or reuses the local owner without a separate service installation.

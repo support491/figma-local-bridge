@@ -1,77 +1,87 @@
-# Install Figma Local Bridge in Claude Desktop
+# Use Figma Local Bridge with Claude Desktop
 
-This staff package is for Claude Desktop and Figma Desktop on a Mac. Claude supplies the Node.js runtime, and the extension includes the ready-to-run bridge and its dependencies.
+For Claude Desktop and Figma Desktop on a Mac. This package works with your team's Claude Personal and Figma Professional setup. Arsenio provides one staff-kit ZIP containing both parts; you do not need GitHub, Terminal, npm, a separate Node.js installation, or a Figma API token.
 
-## What you need
+## Install once
 
-- Claude Desktop and Figma Desktop, both installed and signed in.
-- The `.mcpb` extension file and companion Figma plugin ZIP from Arsenio, or the staff-kit ZIP containing both parts and **START-HERE.html**. Unzip the staff kit and open **START-HERE.html** for the shortest setup walkthrough.
-- Permission to edit the Figma Design files you want to work on.
+1. Download the staff-kit ZIP from Arsenio's team download folder. Double-click the ZIP, then open **START-HERE.html** for the short setup walkthrough.
+2. Open Claude Desktop. Go to **Settings → Desktop app → Extensions → Manage**. Older layouts show **Settings → Extensions**.
+3. Open **Advanced settings**, choose **Install Extension…**, and select the file ending in **.mcpb** from the extracted staff kit. Keep its extension; do not unzip the `.mcpb` itself.
+4. Review and install it. This is an unsigned private build. If your Mac or Claude blocks it, send the message to Arsenio; do not disable your company's security controls.
+5. Start a regular Claude chat. Under **+ → Connectors**, enable **Figma Local Bridge** if needed. Completely quit Claude with **Command Q** and reopen it if prompted.
+6. Move the extracted **figma-local-bridge** folder to a permanent location, such as Documents. Keep it there after installation.
+7. In Figma Desktop, open a Figma Design file you can edit. Choose **Plugins → Development → Import plugin from manifest…**.
+8. Select **manifest.json** inside the folder you moved, then click **Open**.
 
-You do not need GitHub access, Terminal commands, npm, a separate Node.js installation, or a Figma API token to use these packages.
+Claude starts the local bridge automatically. The Figma plugin is a separate one-time installation. Opening the Claude extension alone does not install the Figma half.
 
-## Install the Claude extension once
+## Start your first task
 
-1. Save the `.mcpb` file on your Mac. Keep its `.mcpb` extension; you do not need to unzip it.
-2. Open Claude Desktop. Go to **Settings → Desktop app → Extensions → Manage**. Older Claude layouts show **Settings → Extensions**.
-3. Open **Advanced settings**, click **Install Extension…**, and choose the `.mcpb` file.
-4. Review the extension details and approve installation if it is the package you received from Arsenio. This private build is unsigned; your organization's policy may require an administrator to approve it.
-5. Start a regular Claude chat. Under **+ → Connectors**, look for **Figma Local Bridge** and enable it if needed.
+1. Open the intended Figma file and run **Plugins → Development → Local MCP Bridge**. Leave its panel open.
+2. Check the file and page shown in the welcome screen. Use **Check connection** if the bridge is unavailable or versions do not match.
+3. Choose the task to check your file and click **Copy instructions for Claude**. Paste into a regular Claude Desktop chat.
+4. Read Claude's file and page confirmation. It should match what you see in Figma before you ask it to edit anything.
+5. Select the whole artboard, group, or section you want to edit in Figma. It must sit directly on the page; select its outer frame rather than an individual headline or image. Click **Work on a copy** to duplicate the selected design immediately. The copy becomes selected; your original stays in place.
+6. Choose a task, enter your details, then click **Copy instructions for Claude** again. Paste the fresh message into Claude.
+7. Review Claude's tool requests and check the finished design in Figma.
 
-Claude starts the bridge automatically when it loads the extension. If Claude asks you to restart, completely quit it with **Command Q**, then reopen it.
+The task options help you check the file, change a headline, create a campaign variation, or export selected graphics. These are prompt templates: Claude carries out the task after you paste and send the instructions. The file/page and selection are captured for that prompt. Copy fresh instructions after changing pages, changing the selection, or restarting the plugin.
 
-## Install the Figma plugin once
+Example task details:
 
-1. Unzip the companion Figma plugin ZIP. Move the extracted **figma-local-bridge** folder somewhere permanent, such as a folder in Documents. Keep it there after installation.
-2. Open Figma Desktop and a Figma Design file you can edit.
-3. Choose **Plugins → Development → Import plugin from manifest…**.
-4. Select **manifest.json** inside the extracted folder and click **Open**.
+> Change the headline to “Your summer starts here”. Keep the current fonts, colours, and layout. Check that the new text fits.
 
-Installing the Claude extension does not install the Figma plugin. These are two separate, one-time installations. An organization-published Figma version, if provided by your administrator, can replace the manual import.
+**Work on a copy** creates ordinary Figma duplicates. The generated instructions identify the copies, but they are not a technical permission boundary around Claude's tools. Check Claude's proposed edits and the result. Select the copy before each new task if you want to continue working on it.
 
-## Connect a file and start working
+## Undo an edit
 
-1. In the Figma file, run **Plugins → Development → Local MCP Bridge**. Leave its panel open while you work.
-2. Check that the panel says **Connected**. Click **Expand**, then **Connected files**. Give the connection a clear name, such as **Marketing Campaign**. Paste the file link from Figma's Share menu and click **Save connection details**.
-3. In a regular Claude Desktop chat, paste this message, replacing the connection name if needed:
-
-> Use the Figma Local Bridge tools. First call figma_bridge_status, then figma_list_connections. Confirm the connection named "Marketing Campaign" and its current page. List the artboards on that page. Do not change anything yet. Keep Figma API and comment access disabled.
-
-4. Once Claude confirms the correct file and page, give it one clear task. Review tool requests before approving them, and check the result in Figma.
-
-Example request:
-
-> On the artboard named "Summer Sale", change the headline to "Your summer starts here". Keep the current fonts, colours, and layout. Check that the new text fits, then tell me what changed.
+Click the Figma canvas and press **Command Z**. Check the result after each press. A Claude task can involve several separate edits, so one undo may not reverse the entire task. You can also delete a working copy when you no longer need it; keep the original until you approve the result.
 
 ## Each day
 
-Open Claude Desktop, open your Figma file, and run **Local MCP Bridge** in that file. Ask Claude to confirm the file and page, then describe your task. Saved connection details return automatically. If you duplicate a file, update its saved name and link.
+Open Claude, open your Figma file, run **Local MCP Bridge**, and leave its panel open. Check the displayed file and page. Choose a task and copy its instructions into Claude.
 
-The bridge starts with Claude and stops when Claude closes if the extension owns it. A separately managed background owner keeps running. The Figma plugin panel must stay open during work. This package is for regular Claude Desktop chats; local servers configured this way are unavailable in Claude's website and Cowork.
+The bridge stops when Claude closes if the extension owns it. A separately managed background owner keeps running. A green bridge status confirms the local connection; it does not prove that a specific Claude chat has enabled the connector. Ask Claude to check the file to verify the complete connection.
 
-## If you already used the manual installation
-
-Disable the old manually configured Claude `figma_local` connection before enabling the extension, so Claude does not show two copies of the same tools. Keep your existing preferences and Figma connection details. An administrator should update any separately managed owner to this release before reusing it; the extension does not stop or replace a running service. Bridge and Figma plugin versions should match.
+This package is for regular Claude Desktop chats. Local servers configured this way are unavailable in Claude's website and Cowork.
 
 ## If something is not working
 
-- **The extension cannot be installed:** check with your Claude administrator; private extension policies may block unsigned files.
-- **Claude does not show the tools:** completely quit and reopen Claude, then check the extension's enabled state and error message in Settings.
-- **Figma says Connecting:** open Claude and enable the extension. Close and run the Figma plugin again. If it still fails, send Arsenio the exact error; another service or a mismatched bridge may be using the local endpoint.
-- **Claude sees several files:** give it the saved connection name and ask it to confirm the file and page before editing.
+Use **Check connection** first. It distinguishes a stopped bridge, a disconnected plugin, and a version mismatch, and tells you what to do next.
 
-Keep API and comment access disabled. This package enforces that policy in its launcher and does not request or save Figma API credentials. The bridge binds to loopback and assumes a trusted local computer; it is not isolated from other processes running as your OS user.
+- **Claude does not show the tools:** completely quit and reopen Claude, then check that the extension and chat connector are enabled.
+- **Figma cannot connect:** open Claude and enable the extension. Close and rerun Local MCP Bridge. If it still fails, copy the support details for Arsenio.
+- **Versions do not match:** install both parts from the same staff kit using the update steps below. A separately managed background service may need Arsenio to update it.
+- **The wrong file or page appears:** switch to the intended file/page, run the plugin there, and copy new instructions.
+- **Copying a design fails:** check that the file is editable and select the intended design again. The plugin reports the failure; do not assume a copy was created.
 
-## Updates
+The **Copy support details** action copies diagnostic information for you to review and share. Nothing is sent automatically. The report excludes design content, file links, and local filesystem paths.
 
-For a new private release, install the replacement `.mcpb` from Arsenio and reload the updated companion Figma plugin. Private file installations require installing updates manually. The bridge's preference folder and PNG export folder are outside the extension package and are preserved when it is replaced.
+Advanced settings retain the optional saved connection name/link, connected-file inspector, and technical references. Staff can use the welcome screen without entering them. Keep API and comment access disabled.
 
-## For the person building the staff package
+## Update both parts together
 
-Run `npm ci`, then `npm run package:desktop`. The build creates a versioned `.mcpb`, a companion Figma plugin ZIP, a combined staff-kit ZIP, installation instructions, and SHA-256 checksums under `build/claude-desktop/`. The build compiles the server from source, includes dependency license notices, and archives an explicit file list; local settings and credentials are excluded. `npm run check:desktop` builds and exercises the extracted distribution on an isolated port with a simulated Figma plugin.
+1. Finish the current task, then close the Figma plugin panel and completely quit Claude.
+2. Download the latest approved staff kit from the same team download folder. Keep the old kit until the new version works.
+3. Reopen Claude and install the new `.mcpb` using the installation steps above. If prompted, restart Claude.
+4. Replace the **code.js**, **ui.html**, and **manifest.json** in your permanent Figma plugin folder with the matching files from the new kit. Keep the permanent folder at the same location.
+5. Rerun Local MCP Bridge in Figma. Use **Check connection** and confirm the bridge and plugin versions match.
+6. Copy the check-file instructions into Claude and verify the expected file/page before editing.
 
-The `.mcpb` uses manifest specification 0.3 and Claude's Node runtime (Node 20 or newer). Unlike the existing proxy-only Codex/Claude Code configuration, its launcher uses normal stdio mode: it starts the local owner if available or connects to an existing owner. The launcher forces API access off and clears process-local token settings before importing the bundled server. It does not install a launch agent, rewrite Claude's manual config, or change the running bridge.
+Private file installations require manual updates. The package does not silently replace a background service or download an update. Arsenio can use **RELEASE.json** and **SHA256SUMS.txt** to identify and check the matching packages. Preferences and exported PNGs are stored outside the package and remain when it is replaced.
 
-Source and licensing: this package is Arsenio Aaron's distribution of the MIT-licensed local fork, based on David Buck's Figma Local Bridge. Both copyright notices and the complete license are included.
+## If you already used a manual Claude installation
 
-References: [Claude Desktop extension installation](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop), [MCPB specification](https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md), and [local versus remote Claude connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
+Disable the previous manually configured `figma_local` connection before enabling the extension, so Claude does not show duplicate tools. Keep existing preferences and saved Figma connection details. An administrator must update any separately managed bridge owner to this release; the extension does not stop or replace it.
+
+## For Arsenio and maintainers
+
+See **TEAM-DEPLOYMENT.md** in the staff kit (or [team-deployment.md](team-deployment.md) in the repository) for the shared download and release process. Use **STAFF-PILOT.md** (or [staff-pilot.md](staff-pilot.md)) to record two first-time installations.
+
+Run `npm ci`, `npm run check`, and `npm run package:desktop` to create packages under `build/claude-desktop/`. The build checks that all component versions match, compiles from source, includes dependency notices, and uses an explicit file list that excludes local settings and credentials. Package tests exercise the extracted distribution on an isolated port with a simulated Figma plugin; the staff pilot is the separate live-app check.
+
+The launcher enforces disabled Figma API/comment access. It starts a bridge owner or reuses an existing one, without installing a launch agent or rewriting Claude settings. The bridge binds to loopback and assumes a trusted local computer; it is not isolated from other processes running as the same OS user. Requests and design data used by Claude remain subject to your Claude account's data handling settings.
+
+Arsenio Aaron's distribution of David Buck's MIT-licensed Figma Local Bridge includes both copyright notices and the complete license.
+
+References: [Claude Desktop extensions](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop), [local and remote Claude connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp), [MCPB specification](https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md).

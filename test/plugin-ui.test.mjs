@@ -28,9 +28,10 @@ test("plugin UI never stores the token in browser or Figma client storage", () =
   assert.match(ui, /file_comments:write/);
 });
 
-function loadUi({ fetchImpl = async () => ({ status: 200, ok: true, json: async () => ({ targets: [] }) }) } = {}) {
+function loadUi({ fetchImpl = async () => ({ status: 200, ok: true, json: async () => ({ targets: [] }) }), clipboardImpl } = {}) {
   const nodes = new Map();
   const sent = [];
+  const copied = [];
   const timers = new Map();
   const intervals = [];
   let nextTimer = 0;
@@ -40,14 +41,14 @@ function loadUi({ fetchImpl = async () => ({ status: 200, ok: true, json: async 
   const document = { body: element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
   const parent = { postMessage(message) { sent.push(message.pluginMessage); } };
   const window = {};
-  const context = vm.createContext({ document, parent, window, fetch: fetchImpl, AbortController, navigator: { clipboard: { writeText: async () => {} } }, Date,
+  const context = vm.createContext({ document, parent, window, fetch: fetchImpl, AbortController, navigator: { clipboard: { writeText: clipboardImpl || (async (value) => { copied.push(value); }) } }, Date,
     setTimeout(callback, delay) { const token = ++nextTimer; timers.set(token, { callback, delay }); return token; },
     clearTimeout(token) { timers.delete(token); },
     setInterval(callback) { intervals.push(callback); return intervals.length; },
   });
   const script = ui.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInContext(`${script}\nglobalThis.__uiTests = { renderTargets, localRequest, ageRuntime() { lastRuntimeSeen = Date.now() - 60_000; } };`, context);
-  return { document, nodes, sent, timers, intervals, helpers: context.__uiTests, message: (message, source = parent) => window.onmessage({ source, data: { pluginMessage: message } }) };
+  return { document, nodes, sent, copied, timers, intervals, helpers: context.__uiTests, message: (message, source = parent) => window.onmessage({ source, data: { pluginMessage: message } }) };
 }
 
 test("iframe transport uses cancellable loopback HTTP and reports the response to the native sandbox", async () => {
@@ -240,22 +241,24 @@ test("structural target refresh waits until a focused native picker loses focus"
   assert.equal(picker.value, "hims");
 });
 
-test("compact view starts quietly and expands without reconnecting the transport", async () => {
+test("staff view starts expanded and toggles without reconnecting the transport", async () => {
   const harness = loadUi();
   const toggle = harness.nodes.get("view-toggle");
-  assert.equal(harness.document.body.className, "compact");
-  assert.equal(toggle.textContent, "Expand");
-  assert.equal(toggle.attributes["aria-expanded"], "false");
-  assert.equal(harness.sent.length, 1);
-  toggle.onclick();
   assert.equal(harness.document.body.className, "expanded");
   assert.equal(toggle.textContent, "Compact");
   assert.equal(toggle.attributes["aria-expanded"], "true");
-  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: false, height: 360 });
+  assert.equal(harness.sent.length, 1);
+  toggle.onclick();
+  assert.equal(harness.document.body.className, "compact");
+  assert.equal(toggle.textContent, "Expand");
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: true });
+  toggle.onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: false, height: 700 });
   harness.nodes.get("files-details").open = true;
   harness.nodes.get("files-details").ontoggle();
   assert.equal(harness.sent.at(-1).type, "resize");
-  assert.equal(harness.sent.at(-1).height, 760);
+  assert.equal(harness.sent.at(-1).height, 900);
   toggle.onclick();
   assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: true });
   assert.equal(harness.sent.filter((message) => message.type === "start").length, 1);
@@ -332,10 +335,191 @@ test("reference copying prefers stable then exact saved-name references while re
 test("an in-flight native preference reply cannot override the user’s newer view choice", async () => {
   const harness = loadUi();
   harness.nodes.get("view-toggle").onclick();
-  assert.equal(harness.document.body.className, "expanded");
-  await harness.message({ type: "bridge-view", compact: true });
-  assert.equal(harness.document.body.className, "expanded");
-  assert.equal(harness.nodes.get("view-toggle").textContent, "Compact");
-  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: false, height: 360 });
+  assert.equal(harness.document.body.className, "compact");
+  await harness.message({ type: "bridge-view", compact: false });
+  assert.equal(harness.document.body.className, "compact");
+  assert.equal(harness.nodes.get("view-toggle").textContent, "Expand");
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "panel-view", compact: true });
   assert.equal(harness.sent.filter((message) => message.type === "start").length, 1);
+});
+
+const staffFixture = {
+  type: "staff-context", targetId: "own-file", pluginVersion: "0.14.2-local.4", documentName: "Summer Campaign", pageId: "page-social", pageName: "Social Posts",
+  selection: [{ id: "artboard-original", name: "Summer square", type: "FRAME" }], workingCopyIds: [],
+};
+function staffFetch({ version = "0.14.2-local.4", connected = true, busy = false, offline = false } = {}) {
+  return async (url) => {
+    if (offline) throw new Error("/Users/private-person/confidential-file could not be opened");
+    const data = url.endsWith("/v1/status") ? { bridge: { version } } : url.includes("api-credentials") ? { disabled: true } : { targets: [
+      { targetId: "own-file", sessionId: "own-session", documentName: "Summer Campaign", pageName: "Social Posts", connected, busy },
+      { targetId: "other-file", pageName: "Wrong page", connected: true },
+    ] };
+    return { status: 200, ok: true, json: async () => data };
+  };
+}
+async function connectStaff(harness, context = staffFixture) {
+  await harness.message(context);
+  await harness.message({ type: "bridge-session", sessionId: "own-session", clientId: "own-file" });
+  await harness.message({ type: "bridge-status", kind: "connected", phase: "connected", message: "Connected" });
+  await new Promise(setImmediate);
+}
+
+test("staff prompt verifies its own file and page even when the advanced picker points elsewhere", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch() });
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+  await connectStaff(harness);
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, false);
+  assert.equal(harness.nodes.get("staff-location").textContent, "Summer Campaign → Social Posts");
+  assert.equal(harness.nodes.get("staff-check").attributes["data-health"], "ready");
+  assert.match(harness.nodes.get("staff-check").textContent, /Ready in Figma/);
+  assert.equal(harness.nodes.get("api-details").hidden, true);
+  harness.nodes.get("targets").value = "other-file";
+  harness.nodes.get("targets").onchange();
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  const prompt = harness.copied.at(-1);
+  assert.match(prompt, /First call figma_bridge_status, then figma_list_connections/);
+  assert.match(prompt, /targetId "own-file"/);
+  assert.match(prompt, /pageId "page-social"/);
+  assert.match(prompt, /"artboard-original"/);
+  assert.doesNotMatch(prompt, /other-file|Wrong page/);
+  assert.match(prompt, /Do not change anything/);
+  assert.match(prompt, /Keep Figma API and comment access disabled/);
+});
+
+test("staff marketing tasks carry selected scope, supplied copy and copy-before-variation instructions", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch() });
+  await connectStaff(harness);
+  const task = harness.nodes.get("staff-task");
+  task.value = "headline"; task.onchange();
+  harness.nodes.get("staff-request").value = "Use the headline Summer starts here";
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  assert.match(harness.copied.at(-1), /Summer starts here/);
+  assert.match(harness.copied.at(-1), /check that the new text fits/);
+  task.value = "variation"; task.onchange();
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  assert.match(harness.copied.at(-1), /First duplicate.*figma_duplicate_node/);
+  task.value = "export"; task.onchange();
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  assert.match(harness.copied.at(-1), /Export the selected graphics as PNGs/);
+});
+
+test("working copy action validates the requested selection and prompts target only returned copies", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch() });
+  await connectStaff(harness);
+  harness.nodes.get("staff-copy-design").onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sent.at(-1))), { type: "staff-copy-selection", pageId: "page-social", nodeIds: ["artboard-original"] });
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, true);
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+  await harness.message({ type: "staff-copy-result", pageId: "page-social", createdNodes: [{ id: "artboard-copy", name: "Summer square — working copy", type: "FRAME" }] });
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, false);
+  harness.nodes.get("staff-task").value = "variation";
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  assert.match(harness.copied.at(-1), /"artboard-copy"/);
+  assert.doesNotMatch(harness.copied.at(-1), /artboard-original|First duplicate/);
+  assert.match(harness.copied.at(-1), /Keep the originals unchanged/);
+  await harness.message({ ...staffFixture, pageId: "different-page", pageName: "Other", selection: [] });
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+  assert.equal(harness.nodes.get("staff-prompt").value, "");
+  assert.doesNotMatch(harness.nodes.get("staff-selection").textContent, /Working copies/);
+});
+
+test("busy operations, failures and disconnects cannot leave working-copy controls enabled", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch() });
+  await connectStaff(harness);
+  await harness.message({ type: "bridge-activity", phase: "start", mutating: true, label: "Editing" });
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, true);
+  harness.nodes.get("staff-copy-design").onclick();
+  assert.equal(harness.sent.some((message) => message.type === "staff-copy-selection"), false);
+  await harness.message({ type: "bridge-activity", phase: "finish", mutating: true, ok: true });
+  harness.nodes.get("staff-copy-design").onclick();
+  await harness.message({ type: "staff-error", error: "Select whole artboards on this page." });
+  assert.match(harness.nodes.get("staff-message").textContent, /Select whole artboards/);
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, false);
+  await harness.message({ type: "bridge-status", kind: "waiting", phase: "reconnecting", message: "Reconnecting" });
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, true);
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+});
+
+test("connection diagnostics give version repair instructions and prevent stale-version prompts", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch({ version: "0.14.2-local.3" }) });
+  await connectStaff(harness);
+  assert.match(harness.nodes.get("staff-check").textContent, /matching versions/);
+  assert.match(harness.nodes.get("staff-check").textContent, /Install both parts from the same staff kit/);
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, true);
+});
+
+test("offline diagnostics and support details exclude filenames, task text and raw errors", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch({ offline: true }) });
+  await connectStaff(harness);
+  assert.match(harness.nodes.get("staff-check").textContent, /Open Claude Desktop/);
+  assert.doesNotMatch(harness.nodes.get("staff-check").textContent, /private-person|confidential-file/);
+  harness.nodes.get("staff-request").value = "Secret campaign brief";
+  await harness.nodes.get("staff-copy-support").onclick();
+  const report = JSON.parse(harness.copied.at(-1));
+  assert.equal(report.connection, "offline");
+  assert.equal(report.pluginVersion, "0.14.2-local.4");
+  assert.doesNotMatch(harness.copied.at(-1), /Summer Campaign|Secret campaign|own-file|private-person|\/Users|https:/);
+});
+
+test("a failed clipboard write exposes selectable instructions and stale runtime disables actions", async () => {
+  const harness = loadUi({ fetchImpl: staffFetch(), clipboardImpl: async () => { throw new Error("Clipboard denied"); } });
+  await connectStaff(harness);
+  await harness.nodes.get("staff-copy-prompt").onclick();
+  assert.equal(harness.nodes.get("staff-prompt").hidden, false);
+  assert.equal(harness.nodes.get("staff-prompt").selected, true);
+  assert.match(harness.nodes.get("staff-prompt").value, /targetId "own-file"/);
+  harness.helpers.ageRuntime();
+  harness.intervals[0]();
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, true);
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, true);
+});
+
+
+test("a late connection snapshot cannot restore busy state after native completion", async () => {
+  let hold = false;
+  const pending = [];
+  const readyFetch = staffFetch();
+  const harness = loadUi({ fetchImpl: async (url) => {
+    if (!hold || !url.endsWith("/v1/targets")) return readyFetch(url);
+    return new Promise((resolve) => pending.push(() => resolve({ status: 200, ok: true, json: async () => ({ targets: [{ targetId: "own-file", sessionId: "own-session", connected: true, busy: true }] }) })));
+  } });
+  await connectStaff(harness);
+  await harness.message({ type: "bridge-activity", phase: "start", mutating: true, label: "Editing" });
+  hold = true;
+  const checking = harness.nodes.get("staff-check-connection").onclick();
+  await new Promise(setImmediate);
+  assert.equal(pending.length, 1);
+  await harness.message({ type: "bridge-activity", phase: "finish", mutating: true, ok: true });
+  pending[0]();
+  await checking;
+  assert.equal(harness.nodes.get("staff-check").attributes["data-health"], "ready");
+  assert.equal(harness.nodes.get("staff-copy-design").disabled, false);
+  assert.equal(harness.nodes.get("staff-copy-prompt").disabled, false);
+});
+
+test("delayed clipboard success cannot announce instructions for an earlier page", async () => {
+  let finish;
+  const harness = loadUi({ fetchImpl: staffFetch(), clipboardImpl: () => new Promise((resolve) => { finish = resolve; }) });
+  await connectStaff(harness);
+  const copying = harness.nodes.get("staff-copy-prompt").onclick();
+  await harness.message({ ...staffFixture, pageId: "new-page", pageName: "New page" });
+  finish();
+  await copying;
+  assert.doesNotMatch(harness.nodes.get("staff-message").textContent, /Instructions copied/);
+  assert.equal(harness.nodes.get("staff-prompt").value, "");
+  assert.equal(harness.nodes.get("staff-prompt").hidden, true);
+});
+
+test("delayed clipboard failure cannot reveal an old selection or an empty fallback", async () => {
+  let fail;
+  const harness = loadUi({ fetchImpl: staffFetch(), clipboardImpl: () => new Promise((_, reject) => { fail = reject; }) });
+  await connectStaff(harness);
+  const copying = harness.nodes.get("staff-copy-prompt").onclick();
+  await harness.message({ ...staffFixture, selection: [{ id: "new-artboard", name: "New artboard", type: "FRAME" }] });
+  fail(new Error("Clipboard denied"));
+  await copying;
+  assert.equal(harness.nodes.get("staff-prompt").value, "");
+  assert.equal(harness.nodes.get("staff-prompt").hidden, true);
+  assert.doesNotMatch(harness.nodes.get("staff-message").textContent, /Copy the selected text below/);
 });

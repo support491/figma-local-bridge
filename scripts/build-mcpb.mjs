@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkRelease } from "./check-release.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
@@ -60,19 +61,21 @@ function staffInstructions(extensionName) {
 <li>Open a Figma Design file in Figma Desktop. Choose <b>Plugins → Development → Import plugin from manifest…</b>.</li>
 <li>Select <b>manifest.json</b> inside the folder you moved. Click <b>Open</b>.</li>
 <li>Run <b>Plugins → Development → Local MCP Bridge</b>. Leave its panel open.</li>
-<li>Check that it says <b>Connected</b>. Choose <b>Expand → Connected files</b>, name the connection <b>Marketing Campaign</b>, paste the file link from Figma's Share menu, and choose <b>Save connection details</b>.</li></ol>
+<li>Check the file and page shown in the welcome screen. If you see a connection problem, open <b>Check connection</b> and follow the displayed step.</li></ol>
 <h2>3 Ask Claude to check the file</h2>
-<p>Paste this into a regular Claude Desktop chat. Replace the connection name if you chose a different one:</p>
-<blockquote>Use the Figma Local Bridge tools. First call figma_bridge_status, then figma_list_connections. Confirm the connection named "Marketing Campaign" and its current page. List the artboards. Do not change anything yet. Keep Figma API and comment access disabled.</blockquote>
-<p>After Claude confirms the correct file and page, give it one clear task and check the result in Figma.</p>
-<h2>Each day</h2><p>Open Claude, open the Figma file, run Local MCP Bridge, and leave the plugin panel open while you work. Ask Claude to confirm the file and page before editing.</p>
+<ol><li>Choose the task to check your file, then click <b>Copy instructions for Claude</b>.</li><li>Paste into a regular Claude Desktop chat. Claude will confirm the file and page before working.</li><li>For an edit, select the design in Figma and click <b>Work on a copy</b>. This creates a duplicate immediately and selects it.</li><li>Choose a marketing task, add your details, and copy the updated instructions into Claude. Check the result in Figma.</li></ol>
+<p>Task templates help you change a headline, create a campaign variation, or export selected graphics. They prepare instructions for Claude; copying a prompt does not run it.</p>
+<p>To undo an edit, click the Figma canvas and press <b>Command Z</b>. A task may contain several edits, so undo one step at a time and inspect the result.</p>
+<h2>Each day</h2><p>Open Claude, open the Figma file, run Local MCP Bridge, and leave the panel open. Check the displayed file and page, then copy fresh instructions for your task. Copy again after changing pages or restarting the plugin.</p>
 <p>If you already have a manual Claude connection, disable that duplicate before enabling this extension. A separately managed background owner should be updated to this version by its administrator; this package does not replace it. This local connection is for regular Claude Desktop chats.</p>
-<p>If tools are missing, quit and reopen Claude. If Figma stays on Connecting, reopen the plugin and check that the extension is enabled. Send the exact error to Arsenio if it still fails.</p>
+<p>If tools are missing, quit and reopen Claude. Use <b>Check connection</b> for connection or version problems. You can copy support details for Arsenio; nothing is sent automatically.</p>
 <p>The bridge runs locally while Claude is open. API/comment access stays disabled. See <b>INSTALL.md</b> for upgrade details and the local security boundary.</p>
+<p>Administrators: use <b>TEAM-DEPLOYMENT.md</b> for team distribution and <b>STAFF-PILOT.md</b> to record two first-time installations before wider rollout.</p>
 <p><a href="https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop">Claude extension installation help</a></p></html>\n`;
 }
 
 export async function buildDesktopPackages(outputDirectory = join(repository, "build", "claude-desktop")) {
+  await checkRelease(repository);
   const packageInfo = await json(join(repository, "package.json"));
   const manifest = await json(join(repository, "desktop-extension", "manifest.json"));
   if (manifest.version !== packageInfo.version) throw new Error("Desktop manifest and package versions must match.");
@@ -92,6 +95,8 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
   const text = (value) => new TextEncoder().encode(value);
   const license = await bytes("LICENSE");
   const install = await bytes("docs/claude-desktop.md");
+  const deployment = await bytes("docs/team-deployment.md");
+  const pilot = await bytes("docs/staff-pilot.md");
   const extension = archive({
     "manifest.json": text(`${JSON.stringify(manifest, null, 2)}\n`),
     "icon.png": await bytes("assets/icon.png"),
@@ -113,12 +118,26 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
   const pluginName = `figma-local-bridge-figma-plugin-${packageInfo.version}.zip`;
   const kitName = `figma-local-bridge-staff-kit-${packageInfo.version}.zip`;
   const checksums = [[extensionName, extension], [pluginName, plugin]].map(([name, value]) => `${createHash("sha256").update(value).digest("hex")}  ${name}\n`).join("");
+  const release = text(`${JSON.stringify({
+    schemaVersion: 1,
+    version: packageInfo.version,
+    platforms: manifest.compatibility.platforms,
+    signing: "unsigned",
+    updates: "Install both matching packages; private file installs require manual updates.",
+    packages: [
+      { component: "claude-desktop", file: extensionName, sha256: createHash("sha256").update(extension).digest("hex") },
+      { component: "figma-plugin", file: pluginName, sha256: createHash("sha256").update(plugin).digest("hex") },
+    ],
+  }, null, 2)}\n`);
   const instructions = text(staffInstructions(extensionName));
   const kit = archive({
     [extensionName]: extension,
     ...pluginFiles,
     "START-HERE.html": instructions,
     "INSTALL.md": install,
+    "TEAM-DEPLOYMENT.md": deployment,
+    "STAFF-PILOT.md": pilot,
+    "RELEASE.json": release,
     "SHA256SUMS.txt": text(checksums.split("\n").filter((line) => line.endsWith(extensionName)).join("\n") + "\n"),
   });
   await mkdir(outputDirectory, { recursive: true });
@@ -126,6 +145,9 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
   await writeFile(join(outputDirectory, pluginName), plugin);
   await writeFile(join(outputDirectory, kitName), kit);
   await writeFile(join(outputDirectory, "INSTALL.md"), install);
+  await writeFile(join(outputDirectory, "TEAM-DEPLOYMENT.md"), deployment);
+  await writeFile(join(outputDirectory, "STAFF-PILOT.md"), pilot);
+  await writeFile(join(outputDirectory, "RELEASE.json"), release);
   await writeFile(join(outputDirectory, "START-HERE.html"), instructions);
   await writeFile(join(outputDirectory, "SHA256SUMS.txt"), checksums + `${createHash("sha256").update(kit).digest("hex")}  ${kitName}\n`);
   return { extension: join(outputDirectory, extensionName), plugin: join(outputDirectory, pluginName), kit: join(outputDirectory, kitName), version: packageInfo.version };

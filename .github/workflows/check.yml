@@ -1,0 +1,32 @@
+name: Check staff package
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-release.mjs
+      - run: npm run check
+      - run: npm run package:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staff-package-review
+          path: build/claude-desktop/
+          if-no-files-found: error
+          retention-days: 14

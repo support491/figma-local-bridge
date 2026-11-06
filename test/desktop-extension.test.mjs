@@ -155,6 +155,14 @@ test("staff archives are reproducible, portable, and exclude local settings and 
   assert.match(decode(kitFiles["START-HERE.html"]), /Install Extension/);
   assert.match(decode(kitFiles["START-HERE.html"]), /manifest\.json/);
   assert.ok(kitFiles["SHA256SUMS.txt"]);
+  const release = JSON.parse(decode(kitFiles["RELEASE.json"]));
+  assert.equal(release.version, manifest.version);
+  assert.equal(release.signing, "unsigned");
+  assert.deepEqual(release.platforms, ["darwin"]);
+  assert.ok(kitFiles["TEAM-DEPLOYMENT.md"]);
+  assert.ok(kitFiles["STAFF-PILOT.md"]);
+  assert.match(decode(kitFiles["START-HERE.html"]), /Work on a copy/);
+  assert.match(decode(kitFiles["START-HERE.html"]), /Copy instructions for Claude/);
 });
 
 test("extracted package starts its owner, routes a simulated Figma read, blocks API access, and stops at client EOF", { timeout: 20_000 }, async (context) => {

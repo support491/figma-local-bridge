@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "figma-local-bridge",
   "display_name": "Figma Local Bridge",
-  "version": "0.14.2-local.3",
+  "version": "0.14.2-local.4",
   "description": "Read and edit your open Figma Design files from Claude Desktop.",
   "long_description": "Connect Claude Desktop to Figma Desktop on this computer. The bridge starts with Claude; no separate Node.js installation, npm commands, API token, or background service is needed. Install the companion Figma plugin once, then run it in each design file and keep its panel open. Canvas edits happen in your real Figma file. Figma API and comment access stay disabled. Closing Claude stops a bridge it owns; an existing separately managed owner is left running.",
   "author": {
