@@ -43,6 +43,25 @@ Record **Pass**, **Needs help**, or **Fail** for each person, plus the message o
 
 Arsenio should separately test the update path on the practice machine: install both parts of the new approved kit over an older approved kit, check versions, and run the first task. If testing a mismatch, use only the practice file, follow the displayed update guidance, and restore the matching pair before editing.
 
+## Campaign Studio exercise
+
+Repeat the following on a practice design before distributing this version. Automated and simulated tests do not substitute for this live exercise.
+
+| Exercise and expected result | Staff member 1 | Staff member 2 |
+| --- | --- | --- |
+| Import the same approved brand kit; confirm its version, fonts and colours. | | |
+| Complete the brief and prepare three concepts; originals remain unchanged. | | |
+| Paste the brief in Claude; receive three visibly different editable directions. | | |
+| Review rendered drafts; distinguish measured problems from design suggestions. | | |
+| Modify a reviewed draft and verify its previous approval/review is rejected as stale. | | |
+| Approve a chosen concept; save a checkpoint and restore it as a new draft. | | |
+| Create square, portrait and banner variants; verify readable text and image crops. | | |
+| Review/approve each variant and export the selected campaign files. | | |
+| Close and rerun the plugin; confirm campaign state and checkpoints remain. | | |
+| Finish the campaign explicitly; confirm ordinary file editing is available again. | | |
+
+Record time to an accepted design, manual fixes, and the reason for rejecting any concept across several real briefs. Optional paid image generation should be tested separately only after its provider is configured and a specific request is approved.
+
 ## Finish the pilot
 
 | Decision | Result |

@@ -8,6 +8,11 @@ Object.assign(process.env, {
   FIGMA_CREDENTIAL_BACKEND: "memory",
 });
 
+// Image generation is separate from Figma API access and opt-in per extension.
+// Do not inherit an enabled provider from an unrelated shell configuration.
+process.env.FIGMA_IMAGE_PROVIDER = process.env.FIGMA_IMAGE_ENABLED === "true" ? "openai" : "";
+if (!process.env.FIGMA_IMAGE_PROVIDER) process.env.FIGMA_IMAGE_API_KEY = "";
+
 // Normal stdio mode starts an owner when needed or reuses an existing owner.
 // Do not pass --proxy-only: a first-time Claude user has no separate service.
 await import("./bridge.mjs");

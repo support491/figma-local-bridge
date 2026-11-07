@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "figma-local-bridge",
   "display_name": "Figma Local Bridge",
-  "version": "0.14.2-local.4",
-  "description": "Read and edit your open Figma Design files from Claude Desktop.",
-  "long_description": "Connect Claude Desktop to Figma Desktop on this computer. The bridge starts with Claude; no separate Node.js installation, npm commands, API token, or background service is needed. Install the companion Figma plugin once, then run it in each design file and keep its panel open. Canvas edits happen in your real Figma file. Figma API and comment access stay disabled. Closing Claude stops a bridge it owns; an existing separately managed owner is left running.",
+  "version": "0.14.2-local.5",
+  "description": "Create and review editable campaigns in Figma with Claude Desktop.",
+  "long_description": "Connect Claude Desktop to Figma Desktop on this computer. The bridge starts with Claude; no separate Node.js installation, npm commands, API token, or background service is needed. Install the companion Figma plugin once, then run it in each design file and keep its panel open. Canvas edits happen in your real Figma file. Figma API and comment access stay disabled. Closing Claude stops a bridge it owns; an existing separately managed owner is left running. Campaign Studio adds shared brand kits, guided briefs, three editable concept workspaces, visual reviews, approvals, checkpoints and format adaptation. Optional image generation is disabled by default and requires a separate paid API account.",
   "author": {
     "name": "Arsenio Aaron",
     "url": "https://github.com/support491"
@@ -22,22 +22,58 @@
     "entry_point": "server/launcher.mjs",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/launcher.mjs"],
+      "args": [
+        "${__dirname}/server/launcher.mjs"
+      ],
       "env": {
         "FIGMA_BRIDGE_HOST": "127.0.0.1",
         "FIGMA_BRIDGE_PORT": "3846",
         "FIGMA_BRIDGE_API_DISABLED": "1",
-        "FIGMA_CREDENTIAL_BACKEND": "memory"
+        "FIGMA_CREDENTIAL_BACKEND": "memory",
+        "FIGMA_IMAGE_ENABLED": "${user_config.image_enabled}",
+        "FIGMA_IMAGE_API_KEY": "${user_config.image_api_key}",
+        "FIGMA_IMAGE_MODEL": "${user_config.image_model}"
       }
     }
   },
   "tools_generated": true,
-  "keywords": ["figma", "design", "marketing", "local"],
+  "keywords": [
+    "figma",
+    "design",
+    "marketing",
+    "local"
+  ],
   "license": "MIT",
   "compatibility": {
-    "platforms": ["darwin"],
+    "platforms": [
+      "darwin"
+    ],
     "runtimes": {
       "node": ">=20"
+    }
+  },
+  "user_config": {
+    "image_enabled": {
+      "type": "boolean",
+      "title": "Enable optional paid image generation",
+      "description": "Leave off for normal Figma work. Enable only after an administrator sets up a separate OpenAI API account. Each image request needs your approval.",
+      "required": false,
+      "default": false
+    },
+    "image_api_key": {
+      "type": "string",
+      "title": "Optional image provider API key",
+      "description": "Administrator only. Used for OpenAI image generation when enabled. Never paste this key into a Figma file or chat.",
+      "required": false,
+      "sensitive": true,
+      "default": ""
+    },
+    "image_model": {
+      "type": "string",
+      "title": "Image model",
+      "description": "Administrator setting for the optional image provider.",
+      "required": false,
+      "default": "gpt-image-2.5-flare"
     }
   }
 }

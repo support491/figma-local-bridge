@@ -18,8 +18,8 @@ Claude starts the local bridge automatically. The Figma plugin is a separate one
 ## Start your first task
 
 1. Open the intended Figma file and run **Plugins → Development → Local MCP Bridge**. Leave its panel open.
-2. Check the file and page shown in the welcome screen. Use **Check connection** if the bridge is unavailable or versions do not match.
-3. Choose the task to check your file and click **Copy instructions for Claude**. Paste into a regular Claude Desktop chat.
+2. Check the file and page shown in the welcome screen. Open **Quick edits and connection help → Check connection** if the bridge is unavailable or versions do not match.
+3. Under **Quick edits and connection help**, choose the task to check your file and click **Copy instructions for Claude**. Paste into a regular Claude Desktop chat.
 4. Read Claude's file and page confirmation. It should match what you see in Figma before you ask it to edit anything.
 5. Select the whole artboard, group, or section you want to edit in Figma. It must sit directly on the page; select its outer frame rather than an individual headline or image. Click **Work on a copy** to duplicate the selected design immediately. The copy becomes selected; your original stays in place.
 6. Choose a task, enter your details, then click **Copy instructions for Claude** again. Paste the fresh message into Claude.
@@ -32,6 +32,12 @@ Example task details:
 > Change the headline to “Your summer starts here”. Keep the current fonts, colours, and layout. Check that the new text fits.
 
 **Work on a copy** creates ordinary Figma duplicates. The generated instructions identify the copies, but they are not a technical permission boundary around Claude's tools. Check Claude's proposed edits and the result. Select the copy before each new task if you want to continue working on it.
+
+## Create a campaign
+
+For a complete campaign, use **Campaign Studio** instead of the quick task menu. It guides you through brand kits, a brief, three concept workspaces, visual reviews, approval, saved versions, size adaptation, and exports. Follow **CAMPAIGN-STUDIO.md** in your staff download. Automatic sizes work best with a single editable frame whose main parts are named Headline, Body, CTA, Image, Logo, and Disclaimer as appropriate; Claude can prepare these roles before approval.
+
+Campaign Studio enforces editing boundaries around active drafts. Its originals, saved versions and approved concepts are protected from bridge edits until you explicitly finish the campaign. Optional paid image generation is off by default; leave its extension settings unchanged unless your administrator sets it up.
 
 ## Undo an edit
 

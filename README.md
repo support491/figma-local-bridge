@@ -4,7 +4,7 @@
 
 Inspect and edit the Figma Design files open in Figma Desktop through local MCP tools. A development plugin performs canvas operations through Figma's Plugin API, while a local Node.js server relays named, validated commands. Canvas work needs no personal access token, Figma REST API calls, or hosted Figma MCP connector.
 
-This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.4**. It adds a Claude Desktop staff package and guided task panel, a persistent macOS service, independent file connections, saved connection details, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
+This is the [support491 local fork](https://github.com/support491/figma-local-bridge) of [david-buck/figma-local-bridge](https://github.com/david-buck/figma-local-bridge), based on upstream **0.14.2**. The current local version is **0.14.2-local.5**. It adds Campaign Studio for Claude Desktop, a staff installer, a persistent macOS service, independent file connections, resumable text audits, and local font/design-system tools. The setup below keeps comment tools and Figma API access disabled.
 
 See the [workflow and tool reference](docs/reference.md), [inspect-first workflow skill](skills/figma-local-workflow/SKILL.md), and [changelog](CHANGELOG.md) for more detail.
 
@@ -39,6 +39,16 @@ For Claude Personal and Figma Professional, use the downloadable kit and one sha
 Maintainers can run `npm ci`, `npm run check`, then `npm run package:desktop` to generate matching packages under `build/claude-desktop/`. Builds reject mismatched versions and include **RELEASE.json**, hashes, and the administrator/pilot guides. Pull requests run package checks; pushing a matching `vVERSION` tag runs tests and publishes the paired downloads in one GitHub release. The `.mcpb` remains unsigned. It is separate from the proxy-only Codex/Claude Code plugin manifests; the existing persistent-service workflow below remains available.
 
 ## Quick start
+
+### Campaign Studio for marketing staff
+
+Open **Campaign Studio** in the plugin to save/import an approved brand kit, fill in a campaign brief, and prepare three editable concept workspaces. Copy the brief into Claude Desktop to develop the product, promotional, and editorial directions. The plugin prepares native working copies; Claude performs the AI design work.
+
+Claude reviews rendered concept previews alongside measurable checks, records feedback against the current version, and asks you to choose and approve. Save a checkpoint before further revisions, restore it as a new draft, adapt an approved concept to campaign sizes, then review and approve those variants before export. While the campaign is active, the plugin restricts bridge edits to its drafts and protects the source and approved artwork. **Finish campaign** explicitly releases that restriction and preserves history.
+
+Brand kits are portable JSON files with colours, fonts, voice, rules, reference designs, and template role mappings. Share the approved file with staff; imported Figma node references must be verified or relinked in each destination document. Campaign state is saved with the Figma document. It is not a central team account or an automatic learning system.
+
+See the [plain-language campaign walkthrough](docs/campaign-studio.md) and [optional image setup](docs/image-provider.md). Image generation/editing is disabled by default, uses a separately configured and billed provider, and requires approval for each request. Ordinary campaign work needs no image API key. Figma canvas operations still use the local bridge; AI requests are processed by Claude and, if enabled, the image provider.
 
 ### 1. Clone this fork
 

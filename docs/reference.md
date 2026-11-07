@@ -30,6 +30,22 @@ Operation history is held in the owner process's memory for up to one hour, with
 
 ## Workflows
 
+### Campaign Studio
+
+Use `figma_brand_kit_save/list/get` for explicitly approved, versioned document brand packs. Import/export the JSON through the staff panel to share a pack. A template's node references belong to its Figma file and must be verified/relinked when transferred.
+
+1. Confirm target/file/page and read the intended source artboards. Call `figma_campaign_start` with the brief and source IDs to prepare three concept workspaces. It does not call an AI model or produce three finished designs by itself.
+2. Use existing local tools to develop each returned draft into a distinct creative direction. Active-campaign guards reject writes outside draft roots and global style/variable changes. Reuse existing styles/tokens, or confirmed brand values inside drafts; do not change shared tokens to bypass scope restrictions.
+3. Call `figma_campaign_review` to receive bounded measurable checks and inline screenshots. Inspect every image, identify subjective concerns separately, and refine at most twice before returning remaining issues to the user. Record notes with `figma_campaign_record_review` using the exact returned revision. An interrupted screenshot or a changed draft cannot complete this review.
+4. Ask the user to choose and approve a reviewed concept, then use `figma_campaign_approve`. Approval freezes that concept for ordinary bridge edits. Use a named checkpoint and restore it as a new draft for further revisions.
+5. `figma_campaign_adapt` produces size variants using semantic role mappings and layout rules. Inspect unfamiliar/nested templates carefully; this is bounded adaptation, not a general-purpose layout solver. Review and approve each output independently.
+6. `figma_campaign_export` exports selected, currently approved concepts/variants as local PNGs. It verifies approval again after rendering and reports partial exports when anything fails. Figma retains the editable source and history.
+7. Only on explicit user instruction, `figma_campaign_finish` releases the active draft-only boundary. `figma_campaign_resume` restores it. Never finish a campaign to bypass an edit denial.
+
+Campaign metadata and checkpoints persist with the Figma document; manual edits are detected by fresh artwork fingerprints before review/approval/export. Plugin guards apply to bridge commands, not a person's direct canvas editing or another Figma plugin. The local bridge is still for a trusted local machine, and one writer should own a physical document at a time.
+
+Optional `figma_image_provider_status` performs no network request. `figma_generate_campaign_image` requires a configured provider and the user's approval of the specific paid generation/edit request. Reuse its request ID after interruption. Unknown outcomes are never automatically resubmitted. See [image setup](image-provider.md); keys never belong in prompts, brand packs, or Figma document data.
+
 ### Design-system preference workflow
 
 `figma_get_user_preferences` returns only choices the user explicitly confirmed. When choosing assets, prefer a matching scoped preference, then a linked component already used in the file, then another verified component/style/token, and construct from raw values only as a fallback. Use `figma_create_component_instance` and `figma_apply_design_style` to preserve linkage.
