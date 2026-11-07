@@ -344,10 +344,10 @@ test("an in-flight native preference reply cannot override the user’s newer vi
 });
 
 const staffFixture = {
-  type: "staff-context", targetId: "own-file", pluginVersion: "0.14.2-local.4", documentName: "Summer Campaign", pageId: "page-social", pageName: "Social Posts",
+  type: "staff-context", targetId: "own-file", pluginVersion: "0.14.2-local.5", documentName: "Summer Campaign", pageId: "page-social", pageName: "Social Posts",
   selection: [{ id: "artboard-original", name: "Summer square", type: "FRAME" }], workingCopyIds: [],
 };
-function staffFetch({ version = "0.14.2-local.4", connected = true, busy = false, offline = false } = {}) {
+function staffFetch({ version = "0.14.2-local.5", connected = true, busy = false, offline = false } = {}) {
   return async (url) => {
     if (offline) throw new Error("/Users/private-person/confidential-file could not be opened");
     const data = url.endsWith("/v1/status") ? { bridge: { version } } : url.includes("api-credentials") ? { disabled: true } : { targets: [
@@ -458,7 +458,7 @@ test("offline diagnostics and support details exclude filenames, task text and r
   await harness.nodes.get("staff-copy-support").onclick();
   const report = JSON.parse(harness.copied.at(-1));
   assert.equal(report.connection, "offline");
-  assert.equal(report.pluginVersion, "0.14.2-local.4");
+  assert.equal(report.pluginVersion, "0.14.2-local.5");
   assert.doesNotMatch(harness.copied.at(-1), /Summer Campaign|Secret campaign|own-file|private-person|\/Users|https:/);
 });
 

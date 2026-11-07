@@ -1060,10 +1060,10 @@ var require_util = __commonJS({
     var codegen_1 = require_codegen();
     var code_1 = require_code();
     function toHash(arr) {
-      const hash2 = {};
+      const hash3 = {};
       for (const item of arr)
-        hash2[item] = true;
-      return hash2;
+        hash3[item] = true;
+      return hash3;
     }
     exports.toHash = toHash;
     function alwaysValidSchema(it, schema) {
@@ -2234,10 +2234,10 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize) {
+    function getFullPath(resolver, id2 = "", normalize) {
       if (normalize !== false)
-        id = normalizeId(id);
-      const p = resolver.parse(id);
+        id2 = normalizeId(id2);
+      const p = resolver.parse(id2);
       return _getFullPath(resolver, p);
     }
     exports.getFullPath = getFullPath;
@@ -2247,13 +2247,13 @@ var require_resolve = __commonJS({
     }
     exports._getFullPath = _getFullPath;
     var TRAILING_SLASH_HASH = /#\/?$/;
-    function normalizeId(id) {
-      return id ? id.replace(TRAILING_SLASH_HASH, "") : "";
+    function normalizeId(id2) {
+      return id2 ? id2.replace(TRAILING_SLASH_HASH, "") : "";
     }
     exports.normalizeId = normalizeId;
-    function resolveUrl(resolver, baseId, id) {
-      id = normalizeId(id);
-      return resolver.resolve(baseId, id);
+    function resolveUrl(resolver, baseId, id2) {
+      id2 = normalizeId(id2);
+      return resolver.resolve(baseId, id2);
     }
     exports.resolveUrl = resolveUrl;
     var ANCHOR = /^[a-z_][-a-z0-9._]*$/i;
@@ -3023,8 +3023,8 @@ var require_compile = __commonJS({
       if (Object.keys(root.schema).length > 0 && refPath === baseId) {
         return getJsonPointer.call(this, p, root);
       }
-      const id = (0, resolve_1.normalizeId)(refPath);
-      const schOrRef = this.refs[id] || this.schemas[id];
+      const id2 = (0, resolve_1.normalizeId)(refPath);
+      const schOrRef = this.refs[id2] || this.schemas[id2];
       if (typeof schOrRef == "string") {
         const sch = resolveSchema.call(this, root, schOrRef);
         if (typeof (sch === null || sch === void 0 ? void 0 : sch.schema) !== "object")
@@ -3035,7 +3035,7 @@ var require_compile = __commonJS({
         return;
       if (!schOrRef.validate)
         compileSchema.call(this, schOrRef);
-      if (id === (0, resolve_1.normalizeId)(ref)) {
+      if (id2 === (0, resolve_1.normalizeId)(ref)) {
         const { schema } = schOrRef;
         const { schemaId } = this.opts;
         const schId = schema[schemaId];
@@ -4518,15 +4518,15 @@ var require_core = __commonJS({
             this.addSchema(sch, void 0, _meta, _validateSchema);
           return this;
         }
-        let id;
+        let id2;
         if (typeof schema === "object") {
           const { schemaId } = this.opts;
-          id = schema[schemaId];
-          if (id !== void 0 && typeof id != "string") {
+          id2 = schema[schemaId];
+          if (id2 !== void 0 && typeof id2 != "string") {
             throw new Error(`schema ${schemaId} must be string`);
           }
         }
-        key = (0, resolve_1.normalizeId)(key || id);
+        key = (0, resolve_1.normalizeId)(key || id2);
         this._checkUnique(key);
         this.schemas[key] = this._addSchema(schema, _meta, key, _validateSchema, true);
         return this;
@@ -4605,11 +4605,11 @@ var require_core = __commonJS({
           case "object": {
             const cacheKey = schemaKeyRef;
             this._cache.delete(cacheKey);
-            let id = schemaKeyRef[this.opts.schemaId];
-            if (id) {
-              id = (0, resolve_1.normalizeId)(id);
-              delete this.schemas[id];
-              delete this.refs[id];
+            let id2 = schemaKeyRef[this.opts.schemaId];
+            if (id2) {
+              id2 = (0, resolve_1.normalizeId)(id2);
+              delete this.schemas[id2];
+              delete this.refs[id2];
             }
             return this;
           }
@@ -4671,10 +4671,10 @@ var require_core = __commonJS({
         return this;
       }
       // Add format
-      addFormat(name, format) {
-        if (typeof format == "string")
-          format = new RegExp(format);
-        this.formats[name] = format;
+      addFormat(name, format2) {
+        if (typeof format2 == "string")
+          format2 = new RegExp(format2);
+        this.formats[name] = format2;
         return this;
       }
       errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
@@ -4716,10 +4716,10 @@ var require_core = __commonJS({
         }
       }
       _addSchema(schema, meta3, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
-        let id;
+        let id2;
         const { schemaId } = this.opts;
         if (typeof schema == "object") {
-          id = schema[schemaId];
+          id2 = schema[schemaId];
         } else {
           if (this.opts.jtd)
             throw new Error("schema must be object");
@@ -4729,7 +4729,7 @@ var require_core = __commonJS({
         let sch = this._cache.get(schema);
         if (sch !== void 0)
           return sch;
-        baseId = (0, resolve_1.normalizeId)(id || baseId);
+        baseId = (0, resolve_1.normalizeId)(id2 || baseId);
         const localRefs = resolve_1.getSchemaRefs.call(this, schema, baseId);
         sch = new compile_1.SchemaEnv({ schema, schemaId, meta: meta3, baseId, localRefs });
         this._cache.set(sch.schema, sch);
@@ -4742,9 +4742,9 @@ var require_core = __commonJS({
           this.validateSchema(schema, true);
         return sch;
       }
-      _checkUnique(id) {
-        if (this.schemas[id] || this.refs[id]) {
-          throw new Error(`schema with key or id "${id}" already exists`);
+      _checkUnique(id2) {
+        if (this.schemas[id2] || this.refs[id2]) {
+          throw new Error(`schema with key or id "${id2}" already exists`);
         }
       }
       _compileSchemaEnv(sch) {
@@ -4792,9 +4792,9 @@ var require_core = __commonJS({
     }
     function addInitialFormats() {
       for (const name in this.opts.formats) {
-        const format = this.opts.formats[name];
-        if (format)
-          this.addFormat(name, format);
+        const format2 = this.opts.formats[name];
+        if (format2)
+          this.addFormat(name, format2);
       }
     }
     function addInitialKeywords(defs) {
@@ -6477,18 +6477,18 @@ var require_format = __commonJS({
           });
           const fDef = gen.const("fDef", (0, codegen_1._)`${fmts}[${schemaCode}]`);
           const fType = gen.let("fType");
-          const format = gen.let("format");
-          gen.if((0, codegen_1._)`typeof ${fDef} == "object" && !(${fDef} instanceof RegExp)`, () => gen.assign(fType, (0, codegen_1._)`${fDef}.type || "string"`).assign(format, (0, codegen_1._)`${fDef}.validate`), () => gen.assign(fType, (0, codegen_1._)`"string"`).assign(format, fDef));
+          const format2 = gen.let("format");
+          gen.if((0, codegen_1._)`typeof ${fDef} == "object" && !(${fDef} instanceof RegExp)`, () => gen.assign(fType, (0, codegen_1._)`${fDef}.type || "string"`).assign(format2, (0, codegen_1._)`${fDef}.validate`), () => gen.assign(fType, (0, codegen_1._)`"string"`).assign(format2, fDef));
           cxt.fail$data((0, codegen_1.or)(unknownFmt(), invalidFmt()));
           function unknownFmt() {
             if (opts.strictSchema === false)
               return codegen_1.nil;
-            return (0, codegen_1._)`${schemaCode} && !${format}`;
+            return (0, codegen_1._)`${schemaCode} && !${format2}`;
           }
           function invalidFmt() {
-            const callFormat = schemaEnv.$async ? (0, codegen_1._)`(${fDef}.async ? await ${format}(${data}) : ${format}(${data}))` : (0, codegen_1._)`${format}(${data})`;
-            const validData = (0, codegen_1._)`(typeof ${format} == "function" ? ${callFormat} : ${format}.test(${data}))`;
-            return (0, codegen_1._)`${format} && ${format} !== true && ${fType} === ${ruleType} && !${validData}`;
+            const callFormat = schemaEnv.$async ? (0, codegen_1._)`(${fDef}.async ? await ${format2}(${data}) : ${format2}(${data}))` : (0, codegen_1._)`${format2}(${data})`;
+            const validData = (0, codegen_1._)`(typeof ${format2} == "function" ? ${callFormat} : ${format2}.test(${data}))`;
+            return (0, codegen_1._)`${format2} && ${format2} !== true && ${fType} === ${ruleType} && !${validData}`;
           }
         }
         function validateFormat() {
@@ -6499,7 +6499,7 @@ var require_format = __commonJS({
           }
           if (formatDef === true)
             return;
-          const [fmtType, format, fmtRef] = getFormat(formatDef);
+          const [fmtType, format2, fmtRef] = getFormat(formatDef);
           if (fmtType === ruleType)
             cxt.pass(validCondition());
           function unknownFormat() {
@@ -6526,7 +6526,7 @@ var require_format = __commonJS({
                 throw new Error("async format in sync schema");
               return (0, codegen_1._)`await ${fmtRef}(${data})`;
             }
-            return typeof format == "function" ? (0, codegen_1._)`${fmtRef}(${data})` : (0, codegen_1._)`${fmtRef}.test(${data})`;
+            return typeof format2 == "function" ? (0, codegen_1._)`${fmtRef}(${data})` : (0, codegen_1._)`${fmtRef}.test(${data})`;
           }
         }
       }
@@ -6541,8 +6541,8 @@ var require_format2 = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format();
-    var format = [format_1.default];
-    exports.default = format;
+    var format2 = [format_1.default];
+    exports.default = format2;
   }
 });
 
@@ -7184,17 +7184,17 @@ var require_limit = __commonJS({
           cxt.fail$data((0, codegen_1.or)((0, codegen_1._)`typeof ${fmt} != "object"`, (0, codegen_1._)`${fmt} instanceof RegExp`, (0, codegen_1._)`typeof ${fmt}.compare != "function"`, compareCode(fmt)));
         }
         function validateFormat() {
-          const format = fCxt.schema;
-          const fmtDef = self.formats[format];
+          const format2 = fCxt.schema;
+          const fmtDef = self.formats[format2];
           if (!fmtDef || fmtDef === true)
             return;
           if (typeof fmtDef != "object" || fmtDef instanceof RegExp || typeof fmtDef.compare != "function") {
-            throw new Error(`"${keyword}": format "${format}" does not define "compare" function`);
+            throw new Error(`"${keyword}": format "${format2}" does not define "compare" function`);
           }
           const fmt = gen.scopeValue("formats", {
-            key: format,
+            key: format2,
             ref: fmtDef,
-            code: opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(format)}` : void 0
+            code: opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(format2)}` : void 0
           });
           cxt.fail$data(compareCode(fmt));
         }
@@ -7259,11 +7259,11 @@ import http from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
 import https from "node:https";
 import { lookup } from "node:dns/promises";
-import { randomUUID } from "node:crypto";
-import { mkdir as mkdir2, open as open2, readFile as readFile2, rename as rename2, stat, unlink as unlink2, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir } from "node:os";
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { mkdir as mkdir3, open as open3, readFile as readFile3, rename as rename3, stat, unlink as unlink3, writeFile as writeFile2 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
 import { isIP } from "node:net";
-import { isAbsolute, join as join2 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join3 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -14515,15 +14515,15 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     const syms = normalized.symbolKeys;
     const doc = new Doc(["payload", "ctx"], { shape, inst, memo: memo2, syms });
     const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
-    const prefixStr = (id, k) => `
-          let ${id}_ab = false;
-          for (let i = 0; i < ${id}.issues.length; i++) {
-            const iss = ${id}.issues[i];
+    const prefixStr = (id2, k) => `
+          let ${id2}_ab = false;
+          for (let i = 0; i < ${id2}.issues.length; i++) {
+            const iss = ${id2}.issues[i];
             iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
             payload.issues.push(iss);
-            if (iss.continue !== true) ${id}_ab = true;
+            if (iss.continue !== true) ${id2}_ab = true;
           }
-          if (${id}_ab && ctx && ctx.abortEarly) {
+          if (${id2}_ab && ctx && ctx.abortEarly) {
             payload.value = newResult;
             return payload;
           }`;
@@ -14537,34 +14537,34 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     for (const key of normalized.allKeys) {
       if (key === "__proto__")
         continue;
-      const id = ids[key];
+      const id2 = ids[key];
       const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
       const isPresent = `${k} in input`;
       const schema = shape[key];
       const optin = schema?._zod?.optin;
       const isOptionalIn = optin !== void 0;
       const isOptionalOut = schema?._zod?.optout === "optional";
-      doc.write(`const ${id} = ${parseStr(k)};`);
+      doc.write(`const ${id2} = ${parseStr(k)};`);
       if (isOptionalIn && isOptionalOut) {
-        const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
+        const assign = optin === "optional" ? `${id2}_present` : `${id2}.value !== undefined || ${id2}_present`;
         doc.write(`
-        const ${id}_present = ${isPresent};
-        if (!${id}.issues.length || ${id}_present) {
-          if (${id}.issues.length) {${prefixStr(id, k)}
+        const ${id2}_present = ${isPresent};
+        if (!${id2}.issues.length || ${id2}_present) {
+          if (${id2}.issues.length) {${prefixStr(id2, k)}
           }
 
           if (${assign}) {
-            newResult[${k}] = ${id}.value;
+            newResult[${k}] = ${id2}.value;
           }
         }
 
       `);
       } else if (!isOptionalIn) {
         doc.write(`
-        const ${id}_present = ${isPresent};
-        if (${id}.issues.length) {${prefixStr(id, k)}
+        const ${id2}_present = ${isPresent};
+        if (${id2}.issues.length) {${prefixStr(id2, k)}
         }
-        if (!${id}_present && !${id}.issues.length) {
+        if (!${id2}_present && !${id2}.issues.length) {
           payload.issues.push({
             code: "invalid_type",
             expected: "nonoptional",
@@ -14577,22 +14577,22 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
           }
         }
 
-        if (${id}_present) {
-          newResult[${k}] = ${id}.value;
+        if (${id2}_present) {
+          newResult[${k}] = ${id2}.value;
         }
 
       `);
       } else {
         doc.write(`
-        if (${id}.issues.length) {${prefixStr(id, k)}
+        if (${id2}.issues.length) {${prefixStr(id2, k)}
         }
       `);
         if (optin === "defaulted") {
-          doc.write(`newResult[${k}] = ${id}.value;`);
+          doc.write(`newResult[${k}] = ${id2}.value;`);
         } else {
           doc.write(`
-        if (${id}.value !== undefined || ${isPresent}) {
-          newResult[${k}] = ${id}.value;
+        if (${id2}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id2}.value;
         }
       `);
         }
@@ -24159,8 +24159,8 @@ function generateMultipleOfCheck(doc, ctx, def, accessor) {
   }
 }
 function generateNumberFormatCheck(doc, def, accessor) {
-  const format = def.format;
-  switch (format) {
+  const format2 = def.format;
+  switch (format2) {
     case "safeint":
       doc.write(`if (!Number.isSafeInteger(${accessor})) return INVALID;`);
       break;
@@ -24177,16 +24177,16 @@ function generateNumberFormatCheck(doc, def, accessor) {
       doc.write(`if (!Number.isFinite(${accessor})) return INVALID;`);
       break;
     default: {
-      void format;
-      throw new ZodCompileUnsupportedError(`number format ${format}`);
+      void format2;
+      throw new ZodCompileUnsupportedError(`number format ${format2}`);
     }
   }
 }
 function generateBigIntFormatCheck(doc, def, accessor) {
-  const format = def.format;
-  if (!format)
+  const format2 = def.format;
+  if (!format2)
     return;
-  switch (format) {
+  switch (format2) {
     case "int64":
       doc.write(`if (${accessor} < -9223372036854775808n || ${accessor} > 9223372036854775807n) return INVALID;`);
       break;
@@ -24194,8 +24194,8 @@ function generateBigIntFormatCheck(doc, def, accessor) {
       doc.write(`if (${accessor} < 0n || ${accessor} > 18446744073709551615n) return INVALID;`);
       break;
     default: {
-      void format;
-      throw new ZodCompileUnsupportedError(`bigint format ${format}`);
+      void format2;
+      throw new ZodCompileUnsupportedError(`bigint format ${format2}`);
     }
   }
 }
@@ -24376,8 +24376,8 @@ function generateStringFormatCheck(doc, ctx, def, accessor, needsValue = true) {
     doc.write(`if (!${patternConst}.test(${accessor})) return INVALID;`);
     return accessor;
   }
-  const format = def.format;
-  switch (format) {
+  const format2 = def.format;
+  switch (format2) {
     case "regex":
       throw new ZodCompileUnsupportedError("regex format without a pattern");
     case "lowercase":
@@ -24400,8 +24400,8 @@ function generateStringFormatCheck(doc, ctx, def, accessor, needsValue = true) {
       break;
     }
     default: {
-      void format;
-      throw new ZodCompileUnsupportedError(`string format ${format}`);
+      void format2;
+      throw new ZodCompileUnsupportedError(`string format ${format2}`);
     }
   }
   return accessor;
@@ -26492,12 +26492,12 @@ function _stringbool(Classes, _params) {
   return codec2;
 }
 // @__NO_SIDE_EFFECTS__
-function _stringFormat(Class2, format, fnOrRegex, _params = {}) {
+function _stringFormat(Class2, format2, fnOrRegex, _params = {}) {
   const params = normalizeParams(_params);
   const def = {
     check: "string_format",
     type: "string",
-    format,
+    format: format2,
     fn: typeof fnOrRegex === "function" ? fnOrRegex : (val) => fnOrRegex.test(val),
     ...params
   };
@@ -26620,26 +26620,26 @@ function extractDefs(ctx, schema) {
     return;
   const idToSchema = /* @__PURE__ */ new Map();
   for (const entry of ctx.seen.entries()) {
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
-      const existing = idToSchema.get(id);
+    const id2 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id2) {
+      const existing = idToSchema.get(id2);
       if (existing && existing !== entry[0]) {
-        throw new Error(`Duplicate schema id "${id}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
+        throw new Error(`Duplicate schema id "${id2}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
       }
-      idToSchema.set(id, entry[0]);
+      idToSchema.set(id2, entry[0]);
     }
   }
   const makeURI = (entry) => {
     const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
     if (ctx.external) {
       const externalId = ctx.external.registry.get(entry[0])?.id;
-      const uriGenerator = ctx.external.uri ?? ((id2) => id2);
+      const uriGenerator = ctx.external.uri ?? ((id3) => id3);
       if (externalId) {
         return { ref: uriGenerator(externalId) };
       }
-      const id = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
-      entry[1].defId = id;
-      return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id)}` };
+      const id2 = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
+      entry[1].defId = id2;
+      return { defId: id2, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id2)}` };
     }
     const uriPrefix = `#`;
     const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
@@ -26687,8 +26687,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         continue;
       }
     }
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
+    const id2 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id2) {
       extractToDef(entry);
       continue;
     }
@@ -26921,10 +26921,10 @@ function finalize(ctx, schema) {
   } else {
   }
   if (ctx.external?.uri) {
-    const id = ctx.external.registry.get(schema)?.id;
-    if (!id)
+    const id2 = ctx.external.registry.get(schema)?.id;
+    if (!id2)
       throw new Error("Schema is missing an `id` property");
-    result.$id = ctx.external.uri(id);
+    result.$id = ctx.external.uri(id2);
   }
   assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
   const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
@@ -27063,9 +27063,9 @@ var addPattern = (agg, pattern) => {
 var intersectMime = (agg, mime) => {
   agg.mime = agg.mime ? agg.mime.filter((m) => mime.includes(m)) : [...mime];
 };
-var setFormat = (agg, format) => {
-  agg.format = format;
-  if (format.includes("int"))
+var setFormat = (agg, format2) => {
+  agg.format = format2;
+  if (format2.includes("int"))
     agg.isInt = true;
 };
 var minContributor = (agg, def) => narrowMin(agg, "minimum", def.minimum);
@@ -27143,16 +27143,16 @@ var exactPattern = (p) => exactPatterns.get(p) ?? p;
 var stringProcessor = (schema, ctx, _json, _params) => {
   const json3 = _json;
   json3.type = "string";
-  const { minimum, maximum, format, patterns, contentEncoding, laxFormat } = aggregateChecks(schema);
+  const { minimum, maximum, format: format2, patterns, contentEncoding, laxFormat } = aggregateChecks(schema);
   if (typeof minimum === "number")
     json3.minLength = minimum;
   if (typeof maximum === "number")
     json3.maxLength = maximum;
-  if (format) {
-    json3.format = formatMap[format] ?? format;
+  if (format2) {
+    json3.format = formatMap[format2] ?? format2;
     if (json3.format === "")
       delete json3.format;
-    if (format === "time" || laxFormat) {
+    if (format2 === "time" || laxFormat) {
       delete json3.format;
     }
   }
@@ -27530,7 +27530,7 @@ function stringifyKeyNames(bySchema, json3, visited) {
   const values = json3.enum ?? (json3.const !== void 0 ? [json3.const] : void 0);
   if (!numericType && !values?.some((v) => typeof v === "number"))
     return json3;
-  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id, ...rest } = json3;
+  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format: format2, id: id2, ...rest } = json3;
   if (rest.enum)
     rest.enum = rest.enum.map((v) => typeof v === "number" ? String(v) : v);
   else if (typeof rest.const === "number")
@@ -29310,8 +29310,8 @@ var ZodCustomStringFormat = /* @__PURE__ */ $constructor("ZodCustomStringFormat"
   $ZodCustomStringFormat.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
-function stringFormat(format, fnOrRegex, _params = {}) {
-  return _stringFormat(ZodCustomStringFormat, format, fnOrRegex, _params);
+function stringFormat(format2, fnOrRegex, _params = {}) {
+  return _stringFormat(ZodCustomStringFormat, format2, fnOrRegex, _params);
 }
 function hostname2(_params) {
   return _stringFormat(ZodCustomStringFormat, "hostname", hostname, _params);
@@ -29324,11 +29324,11 @@ function currencyCode2(_params) {
 }
 function hash(alg, params) {
   const enc = params?.enc ?? "hex";
-  const format = `${alg}_${enc}`;
-  const regex = regexes_exports[format];
+  const format2 = `${alg}_${enc}`;
+  const regex = regexes_exports[format2];
   if (!regex)
-    throw new Error(`Unrecognized hash format: ${format}`);
-  return _stringFormat(ZodCustomStringFormat, format, regex, params);
+    throw new Error(`Unrecognized hash format: ${format2}`);
+  return _stringFormat(ZodCustomStringFormat, format2, regex, params);
 }
 var ZodNumber2 = /* @__PURE__ */ $constructor(
   "ZodNumber",
@@ -30693,58 +30693,58 @@ function convertBaseSchema(schema, ctx) {
     case "string": {
       let stringSchema = z.string();
       if (schema.format) {
-        const format = schema.format;
-        if (format === "email") {
+        const format2 = schema.format;
+        if (format2 === "email") {
           stringSchema = stringSchema.check(z.email());
-        } else if (format === "uri" || format === "uri-reference") {
+        } else if (format2 === "uri" || format2 === "uri-reference") {
           stringSchema = stringSchema.check(z.url());
-        } else if (format === "uuid" || format === "guid") {
+        } else if (format2 === "uuid" || format2 === "guid") {
           stringSchema = stringSchema.check(z.uuid());
-        } else if (format === "date-time") {
+        } else if (format2 === "date-time") {
           stringSchema = stringSchema.check(z.iso.datetime({ offset: true }));
-        } else if (format === "date") {
+        } else if (format2 === "date") {
           stringSchema = stringSchema.check(z.iso.date());
-        } else if (format === "time") {
+        } else if (format2 === "time") {
           stringSchema = stringSchema.check(z.regex(fullTime));
-        } else if (format === "duration") {
+        } else if (format2 === "duration") {
           stringSchema = stringSchema.check(z.iso.duration());
-        } else if (format === "hostname") {
+        } else if (format2 === "hostname") {
           stringSchema = stringSchema.check(z.hostname());
-        } else if (format === "ipv4") {
+        } else if (format2 === "ipv4") {
           stringSchema = stringSchema.check(z.ipv4());
-        } else if (format === "ipv6") {
+        } else if (format2 === "ipv6") {
           stringSchema = stringSchema.check(z.ipv6());
-        } else if (format === "mac") {
+        } else if (format2 === "mac") {
           stringSchema = stringSchema.check(z.mac());
-        } else if (format === "cidr") {
+        } else if (format2 === "cidr") {
           stringSchema = stringSchema.check(z.cidrv4());
-        } else if (format === "cidr-v6") {
+        } else if (format2 === "cidr-v6") {
           stringSchema = stringSchema.check(z.cidrv6());
-        } else if (format === "base64") {
+        } else if (format2 === "base64") {
           stringSchema = stringSchema.check(z.base64());
-        } else if (format === "base64url") {
+        } else if (format2 === "base64url") {
           stringSchema = stringSchema.check(z.base64url());
-        } else if (format === "e164") {
+        } else if (format2 === "e164") {
           stringSchema = stringSchema.check(z.e164());
-        } else if (format === "credit_card") {
+        } else if (format2 === "credit_card") {
           stringSchema = stringSchema.check(z.creditCard());
-        } else if (format === "iban") {
+        } else if (format2 === "iban") {
           stringSchema = stringSchema.check(z.iban());
-        } else if (format === "jwt") {
+        } else if (format2 === "jwt") {
           stringSchema = stringSchema.check(z.jwt());
-        } else if (format === "emoji") {
+        } else if (format2 === "emoji") {
           stringSchema = stringSchema.check(z.emoji());
-        } else if (format === "nanoid") {
+        } else if (format2 === "nanoid") {
           stringSchema = stringSchema.check(z.nanoid());
-        } else if (format === "cuid") {
+        } else if (format2 === "cuid") {
           stringSchema = stringSchema.check(z.cuid());
-        } else if (format === "cuid2") {
+        } else if (format2 === "cuid2") {
           stringSchema = stringSchema.check(z.cuid2());
-        } else if (format === "ulid") {
+        } else if (format2 === "ulid") {
           stringSchema = stringSchema.check(z.ulid());
-        } else if (format === "xid") {
+        } else if (format2 === "xid") {
           stringSchema = stringSchema.check(z.xid());
-        } else if (format === "ksuid") {
+        } else if (format2 === "ksuid") {
           stringSchema = stringSchema.check(z.ksuid());
         }
       }
@@ -34504,9 +34504,9 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject2) => {
       const earlyReject = (error62) => {
-        reject(error62);
+        reject2(error62);
       };
       if (!this._transport) {
         earlyReject(new Error("Not connected"));
@@ -34568,24 +34568,24 @@ var Protocol = class {
           }
         }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error63) => this._onerror(new Error(`Failed to send cancellation: ${error63}`)));
         const error62 = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
-        reject(error62);
+        reject2(error62);
       };
       this._responseHandlers.set(messageId, (response) => {
         if (options?.signal?.aborted) {
           return;
         }
         if (response instanceof Error) {
-          return reject(response);
+          return reject2(response);
         }
         try {
           const parseResult = safeParse2(resultSchema, response.result);
           if (!parseResult.success) {
-            reject(parseResult.error);
+            reject2(parseResult.error);
           } else {
             resolve(parseResult.data);
           }
         } catch (error62) {
-          reject(error62);
+          reject2(error62);
         }
       });
       options?.signal?.addEventListener("abort", () => {
@@ -34611,12 +34611,12 @@ var Protocol = class {
           timestamp: Date.now()
         }).catch((error62) => {
           this._cleanupTimeout(messageId);
-          reject(error62);
+          reject2(error62);
         });
       } else {
         this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error62) => {
           this._cleanupTimeout(messageId);
-          reject(error62);
+          reject2(error62);
         });
       }
     });
@@ -34844,15 +34844,15 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject2) => {
       if (signal.aborted) {
-        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
+        reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
       const timeoutId = setTimeout(resolve, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
-        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
+        reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
       }, { once: true });
     });
   }
@@ -35098,7 +35098,7 @@ var ExperimentalServerTasks = class {
       if (hasPreviousToolUse) {
         const toolUseIds = new Set(previousContent.filter((c) => c.type === "tool_use").map((c) => c.id));
         const toolResultIds = new Set(lastContent.filter((c) => c.type === "tool_result").map((c) => c.toolUseId));
-        if (toolUseIds.size !== toolResultIds.size || ![...toolUseIds].every((id) => toolResultIds.has(id))) {
+        if (toolUseIds.size !== toolResultIds.size || ![...toolUseIds].every((id2) => toolResultIds.has(id2))) {
           throw new Error("ids of tool_result blocks and tool_use blocks from previous message do not match");
         }
       }
@@ -35523,7 +35523,7 @@ var Server = class extends Protocol {
       if (hasPreviousToolUse) {
         const toolUseIds = new Set(previousContent.filter((c) => c.type === "tool_use").map((c) => c.id));
         const toolResultIds = new Set(lastContent.filter((c) => c.type === "tool_result").map((c) => c.toolUseId));
-        if (toolUseIds.size !== toolResultIds.size || ![...toolUseIds].every((id) => toolResultIds.has(id))) {
+        if (toolUseIds.size !== toolResultIds.size || ![...toolUseIds].every((id2) => toolResultIds.has(id2))) {
           throw new Error("ids of tool_result blocks and tool_use blocks from previous message do not match");
         }
       }
@@ -36671,7 +36671,7 @@ import { join } from "node:path";
 var service = "figma-local-bridge";
 var account = "figma-rest-api";
 async function runCredentialCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, reject2) => {
     const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     const stdout = [];
     const stderr = [];
@@ -36684,11 +36684,11 @@ async function runCredentialCommand(command, args, options = {}) {
     };
     const timer = setTimeout(() => {
       child.kill();
-      finish(reject, new Error("Credential storage command timed out."));
+      finish(reject2, new Error("Credential storage command timed out."));
     }, options.timeoutMs ?? 1e4);
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.once("error", (error62) => finish(reject, error62));
+    child.once("error", (error62) => finish(reject2, error62));
     child.once("close", (code) => finish(resolve, {
       code,
       stdout: Buffer.concat(stdout).toString("utf8"),
@@ -36887,6 +36887,415 @@ function createCredentialStore(options = {}) {
   };
 }
 
+// campaign-tools.mjs
+var id = external_exports.string().trim().min(1).max(200);
+var short = external_exports.string().trim().max(500);
+var roleNames = ["headline", "body", "cta", "image", "logo", "disclaimer"];
+var roles = external_exports.object(Object.fromEntries(roleNames.map((name) => [name, id.optional()]))).strict();
+var format = external_exports.object({
+  name: external_exports.string().trim().min(1).max(80),
+  width: external_exports.number().int().min(240).max(4096),
+  height: external_exports.number().int().min(240).max(4096)
+}).strict();
+var brandKitSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1).default(1),
+  id: external_exports.string().trim().regex(/^[a-zA-Z0-9_-]{1,80}$/),
+  name: external_exports.string().trim().min(1).max(100),
+  version: external_exports.string().trim().min(1).max(40),
+  colors: external_exports.array(external_exports.object({ name: short, hex: external_exports.string().regex(/^#[0-9a-fA-F]{6}$/) }).strict()).max(40).default([]),
+  fonts: external_exports.array(external_exports.object({ family: external_exports.string().trim().min(1).max(100), style: external_exports.string().trim().min(1).max(100) }).strict()).max(20).default([]),
+  voice: external_exports.string().max(4e3).default(""),
+  rules: external_exports.array(external_exports.string().trim().min(1).max(500)).max(40).default([]),
+  references: external_exports.array(external_exports.string().max(1e3)).max(20).default([]),
+  templates: external_exports.array(external_exports.object({ name: short, nodeId: id, roles: roles.default({}) }).strict()).max(20).default([])
+}).strict();
+var campaignInstructions = [
+  "Campaign Studio: use figma_brand_kit_list/get to discover approved packs before starting. During a campaign its returned campaign.brandKit snapshot is authoritative; do not silently switch to a later saved kit version. Imported template/node references must be verified in this file before use.",
+  "Use figma_campaign_start only for an explicit campaign brief and verified source artboards. It prepares three editable draft directions, not finished AI designs. Read the returned draft IDs and design distinct product, promotional and editorial compositions with the existing local canvas tools.",
+  "Campaign scope is enforced by the plugin. Edit only returned draft roots/descendants. Never finish or resume a campaign merely to bypass an editing restriction.",
+  "Automatic format adaptation needs one editable FRAME per concept and distinct direct-child role layers named Headline, Body, CTA, Image, Logo, or Disclaimer as applicable. Establish this structure in drafts before review/approval; figma_rename_node can name verified layers. For existing nonstandard names pass verified role IDs to adaptation. Nested mappings require a restored draft and new approval before restructuring.",
+  "For each concept call figma_campaign_review. Inspect EVERY returned rendered image and its measurable checks. Distinguish subjective visual critique from measured errors and unknown checks. Refine at most twice per review request; if unresolved, report remaining issues instead of looping.",
+  "After actually inspecting the images, call figma_campaign_record_review with that exact revision, concise notes and unresolved issues. Any subsequent edit invalidates the review. A text-only export path is not visual evidence.",
+  "Present all three creative directions and wait for the user to choose. Only call figma_campaign_approve after explicit approval of that exact reviewed concept. Do not invent approval or promise campaign performance from a design score.",
+  "Use figma_campaign_adapt to make editable format variants with verified semantic role IDs. Review and obtain approval for variants before figma_campaign_export. Preserve originals, approved versions and checkpoints.",
+  "Optional image generation: check figma_image_provider_status first. A separately configured provider may charge for a request. Call figma_generate_campaign_image only after the user authorizes the specific image request; reuse requestId after interruption. Do not request a key in chat, auto-retry an uncertain paid request, or place generated imagery outside campaign drafts."
+].join("\n");
+function registerCampaignTools(server2, { sendCommand: sendCommand2, output: output3, failure: failure3, imageOutput: imageOutput2, writePngExport: writePngExport2 }) {
+  function command(name, title, description, inputSchema, nativeCommand) {
+    server2.registerTool(name, { title, description, inputSchema, localCanvas: true }, async (input2) => {
+      try {
+        return output3(await sendCommand2(nativeCommand, input2, 12e4));
+      } catch (error62) {
+        return failure3(error62);
+      }
+    });
+  }
+  command("figma_brand_kit_save", "Save an approved brand kit", "Save/import an explicitly approved versioned brand kit in this Figma document. No automatic learning. Packs can be exported from the panel and imported by colleagues; node IDs must be relinked/verified per file. Never store secrets.", { kit: brandKitSchema }, "brandKitSave");
+  command("figma_brand_kit_list", "List brand kits", "List the brand kits saved in the connected document.", {}, "brandKitList");
+  command("figma_brand_kit_get", "Read a brand kit", "Read the exact approved brand kit, including typography, palette, voice, reference designs and template role mappings.", { id }, "brandKitGet");
+  command("figma_campaign_start", "Prepare three campaign concepts", "Prepare protected working copies for three distinct creative directions from explicitly chosen page-root artboards. This creates starting drafts; Claude must design each direction using native tools, then visually review it. Originals remain protected while the campaign is active.", {
+    name: external_exports.string().trim().min(1).max(120),
+    pageId: id,
+    nodeIds: external_exports.array(id).min(1).max(4),
+    brandKitId: id.optional(),
+    brief: external_exports.object({ objective: external_exports.string().trim().min(1).max(2e3), audience: short, offer: short, callToAction: short, formats: external_exports.array(format).max(8).default([]) }).strict()
+  }, "campaignStart");
+  command("figma_campaign_status", "Read campaign progress", "Read persistent campaign concepts, review state, approvals, format variants and checkpoints. Inspect this after interruptions; never blindly start duplicate work.", { campaignId: id.optional() }, "campaignStatus");
+  server2.registerTool("figma_campaign_review", {
+    localCanvas: true,
+    title: "Visually review a campaign concept",
+    description: "Run bounded measurable checks and return every concept artboard as an inline image for Claude to inspect. Screenshot failures or changed drafts prevent evidence registration. Inspect all images before recording subjective review. Unknown/partial checks must be reported; they are not a pass.",
+    inputSchema: { campaignId: id, conceptId: id }
+  }, async (input2) => {
+    try {
+      const review = await sendCommand2("campaignReview", input2, 12e4);
+      if (!Array.isArray(review.nodeIds) || !review.nodeIds.length || review.nodeIds.length > 4 || typeof review.revision !== "string") throw new Error("Campaign review returned invalid draft references; no review was recorded.");
+      const images = [];
+      for (const nodeId2 of review.nodeIds) {
+        const screenshot = await sendCommand2("screenshot", { target: "node", nodeId: nodeId2, maxDimension: 1600, scale: 1 }, 12e4);
+        if (!screenshot.imageBase64 || screenshot.mimeType !== "image/png") throw new Error("A campaign preview could not be rendered. Review was not recorded; inspect the draft before retrying.");
+        images.push(...imageOutput2({ ...screenshot, nodeId: nodeId2 }).content);
+      }
+      await sendCommand2("campaignReviewEvidence", { ...input2, revision: review.revision }, 12e4);
+      return { content: [...output3({ ...review, nextStep: "Inspect every image, compare against the brief/brand kit, and record subjective notes and unresolved issues with this exact revision. Refine at most twice, re-review after edits, and ask the user to choose/approve." }).content, ...images] };
+    } catch (error62) {
+      return failure3(error62);
+    }
+  });
+  command("figma_campaign_record_review", "Record a visual campaign review", "Only after inspecting every image from figma_campaign_review, record subjective notes and unresolved visual issues against its exact revision. This does not approve the design; changed or unrendered drafts are rejected.", {
+    campaignId: id,
+    conceptId: id,
+    revision: id,
+    reviewed: external_exports.literal(true),
+    notes: external_exports.string().trim().min(1).max(4e3),
+    issues: external_exports.array(external_exports.string().trim().min(1).max(500)).max(40).default([])
+  }, "campaignRecordReview");
+  command("figma_campaign_approve", "Approve a reviewed concept", "Only after the user explicitly approves this exact concept/revision. Measurable checks and visual review must be current. Approved artwork becomes protected; create a restored draft to edit it further.", { campaignId: id, conceptId: id, revision: id, userConfirmed: external_exports.literal(true) }, "campaignApprove");
+  command("figma_campaign_checkpoint", "Save a campaign checkpoint", "Preserve the chosen concept as a named checkpoint before a requested revision. Checkpoints retain native editable artwork and are protected from ordinary bridge mutations.", { campaignId: id, conceptId: id, label: external_exports.string().trim().min(1).max(100) }, "campaignCheckpoint");
+  command("figma_campaign_restore", "Restore a checkpoint as a new draft", "With explicit user confirmation, restore a saved checkpoint into a new editable draft. Preserve all existing versions. The restored draft needs a fresh review and approval.", { campaignId: id, checkpointId: id, userConfirmed: external_exports.literal(true) }, "campaignRestore");
+  command("figma_campaign_adapt", "Adapt a concept to campaign formats", "Create editable format variants from the chosen concept using verified semantic roles and bounded layout rules. Review all outputs; reflow is not guaranteed for arbitrary nested templates. Supply verified role node IDs and optional image focal point (0\u20131). Each output requires review and approval.", {
+    campaignId: id,
+    conceptId: id,
+    formats: external_exports.array(format).min(1).max(8),
+    roles: roles.optional(),
+    focalPoint: external_exports.object({ x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) }).strict().optional()
+  }, "campaignAdapt");
+  command("figma_campaign_finish", "Finish a campaign editing session", "Only when the user explicitly finishes this campaign: release its draft-only editing restriction while preserving artwork, approvals and history. Never call this to bypass a failed scoped edit.", { campaignId: id, userConfirmed: external_exports.literal(true) }, "campaignFinish");
+  command("figma_campaign_resume", "Resume a saved campaign", "With explicit user confirmation, restore the campaign's draft-only editing boundary. Recheck file/page and status first; reviews remain subject to freshness checks.", { campaignId: id, userConfirmed: external_exports.literal(true) }, "campaignResume");
+  server2.registerTool("figma_campaign_export", {
+    localCanvas: true,
+    title: "Export an approved campaign",
+    description: "Export the selected approved concepts/format variants as local PNGs. Requires current approval for every selected item. Returns an explicit manifest of paths/dimensions. Stops on changed approval or export failure and reports partial output without claiming a complete kit.",
+    inputSchema: { campaignId: id, conceptIds: external_exports.array(id).min(1).max(12), scale: external_exports.number().min(0.1).max(4).default(1) }
+  }, async (input2) => {
+    const exports = [];
+    try {
+      const plan = await sendCommand2("campaignExportPlan", input2, 12e4);
+      if (!Array.isArray(plan.nodeIds) || !plan.nodeIds.length || plan.nodeIds.length > 48) throw new Error("Campaign returned an invalid export plan.");
+      for (const nodeId2 of plan.nodeIds) {
+        exports.push(await writePngExport2(await sendCommand2("exportFramePng", { nodeId: nodeId2, maxDimension: 8192, scale: input2.scale }, 12e4)));
+      }
+      const fresh = await sendCommand2("campaignExportPlan", input2, 12e4);
+      if (JSON.stringify(fresh) !== JSON.stringify(plan)) throw new Error("The approved campaign changed during export. Treat these files as unverified and export again after review.");
+      return output3({ campaignId: input2.campaignId, complete: true, exports, note: "These PNGs are local files. Editable source artwork and approval history remain in the Figma document." });
+    } catch (error62) {
+      return { ...failure3(error62), content: [...failure3(error62).content, ...output3({ campaignId: input2.campaignId, complete: false, partialExports: exports }).content] };
+    }
+  });
+}
+
+// image-provider.mjs
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir as mkdir2, open as open2, readFile as readFile2, rename as rename2, unlink as unlink2 } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join as join2 } from "node:path";
+import { inflateSync } from "node:zlib";
+var DEFAULT_MODEL = "gpt-image-2.5-flare";
+var MODELS = /* @__PURE__ */ new Set(["gpt-image-1-mini", "gpt-image-1.5", "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"]);
+var SIZES = /* @__PURE__ */ new Set(["1024x1024", "1536x1024", "1024x1536"]);
+var MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+var MAX_RESPONSE_BYTES = 36 * 1024 * 1024;
+var DEFAULT_DIRECTORY = join2(homedir(), "Pictures", "Figma MCP Exports", "Generated Campaign Images");
+var hash2 = (value) => createHash("sha256").update(value).digest("hex");
+var ImageProviderError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "ImageProviderError";
+    this.code = code;
+  }
+};
+function reject(code, message) {
+  throw new ImageProviderError(code, message);
+}
+function getImageProviderStatus({ env = process.env } = {}) {
+  const provider = env.FIGMA_IMAGE_PROVIDER?.trim() || "disabled";
+  const model = env.FIGMA_IMAGE_MODEL?.trim() || DEFAULT_MODEL;
+  const supported = provider === "openai";
+  const modelSupported = MODELS.has(model);
+  const apiKey = env.FIGMA_IMAGE_API_KEY?.trim();
+  const configured = typeof apiKey === "string" && /^\S{12,4096}$/.test(apiKey) && !apiKey.includes("${") && !apiKey.startsWith("__encrypted__:");
+  return {
+    enabled: supported && modelSupported && configured,
+    provider: supported ? "openai" : "disabled",
+    model: modelSupported ? model : null,
+    reason: !supported ? "Image generation is off. Ask your administrator to configure the optional provider." : !modelSupported ? "The configured image model is not supported by this package." : !configured ? "The optional provider needs an API key configured by your administrator." : "Ready. Each requested generation or edit uses the separately billed OpenAI API.",
+    sizes: [...SIZES],
+    maxImagesPerRequest: 1,
+    outputFormat: "png",
+    requiresUserConfirmation: true,
+    dataSent: "Your image prompt, and the selected local image when editing, are sent to OpenAI. No Figma file is sent automatically."
+  };
+}
+function dimensions(width, height, mimeType) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 8192 || height > 8192 || width * height > 16777216) reject("INVALID_IMAGE", "The image dimensions are invalid or exceed the supported limit.");
+  return { width, height, mimeType };
+}
+var crcTable = Array.from({ length: 256 }, (_, i) => {
+  for (let n = 0; n < 8; n++) i = i & 1 ? 3988292384 ^ i >>> 1 : i >>> 1;
+  return i >>> 0;
+});
+function crc32(bytes) {
+  let crc = 4294967295;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 255] ^ crc >>> 8;
+  return (crc ^ 4294967295) >>> 0;
+}
+function rasterInfo(bytes) {
+  if (bytes.length < 16 || bytes.length > MAX_IMAGE_BYTES) reject("INVALID_IMAGE", "Use a complete PNG, JPEG, or WebP image no larger than 25 MB.");
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    let offset = 8, info, ended = false, bitDepth, colorType, interlace;
+    const compressed = [];
+    while (offset + 12 <= bytes.length) {
+      const length = bytes.readUInt32BE(offset);
+      if (length > MAX_IMAGE_BYTES || offset + length + 12 > bytes.length) reject("INVALID_IMAGE", "The PNG image is incomplete.");
+      const type = bytes.toString("ascii", offset + 4, offset + 8);
+      if (crc32(bytes.subarray(offset + 4, offset + 8 + length)) !== bytes.readUInt32BE(offset + 8 + length)) reject("INVALID_IMAGE", "The PNG image failed its integrity check.");
+      if (!info && type !== "IHDR") reject("INVALID_IMAGE", "The PNG image has no valid header.");
+      if (type === "IHDR") {
+        if (info || length !== 13) reject("INVALID_IMAGE", "The PNG image has an invalid header.");
+        info = dimensions(bytes.readUInt32BE(offset + 8), bytes.readUInt32BE(offset + 12), "image/png");
+        bitDepth = bytes[offset + 16];
+        colorType = bytes[offset + 17];
+        interlace = bytes[offset + 20];
+        const depths = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
+        if (!depths[colorType]?.includes(bitDepth) || bytes[offset + 18] !== 0 || bytes[offset + 19] !== 0 || ![0, 1].includes(interlace)) reject("INVALID_IMAGE", "The PNG image uses an unsupported encoding.");
+      }
+      if (type === "IDAT") compressed.push(bytes.subarray(offset + 8, offset + 8 + length));
+      offset += length + 12;
+      if (type === "IEND") {
+        if (length !== 0) reject("INVALID_IMAGE", "The PNG image has an invalid ending.");
+        ended = true;
+        break;
+      }
+    }
+    if (!ended || offset !== bytes.length || !compressed.length) reject("INVALID_IMAGE", "The PNG image is incomplete.");
+    try {
+      const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+      const rowBytes = Math.ceil(info.width * channels * bitDepth / 8) + 1;
+      const raw = inflateSync(Buffer.concat(compressed), { maxOutputLength: Math.min(140 * 1024 * 1024, (rowBytes + 16) * (info.height + 16)) });
+      if (!raw.length || !interlace && raw.length !== rowBytes * info.height) reject("INVALID_IMAGE", "The PNG pixel data is incomplete.");
+    } catch {
+      reject("INVALID_IMAGE", "The PNG pixel data is invalid or too large.");
+    }
+    return info;
+  }
+  if (bytes[0] === 255 && bytes[1] === 216 && bytes.at(-2) === 255 && bytes.at(-1) === 217) {
+    let offset = 2;
+    while (offset + 4 <= bytes.length) {
+      if (bytes[offset] !== 255) break;
+      while (bytes[offset] === 255) offset++;
+      const marker = bytes[offset++];
+      if (marker === 218 || marker === 217) break;
+      if (marker === 1 || marker >= 208 && marker <= 215) continue;
+      if (offset + 2 > bytes.length) break;
+      const length = bytes.readUInt16BE(offset);
+      if (length < 2 || offset + length > bytes.length) break;
+      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && length >= 8) return dimensions(bytes.readUInt16BE(offset + 5), bytes.readUInt16BE(offset + 3), "image/jpeg");
+      offset += length;
+    }
+  }
+  if (bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP" && bytes.readUInt32LE(4) + 8 === bytes.length) {
+    let offset = 12, info, pixels = false;
+    while (offset + 8 <= bytes.length) {
+      const kind = bytes.toString("ascii", offset, offset + 4), length = bytes.readUInt32LE(offset + 4), data = offset + 8;
+      if (data + length > bytes.length) break;
+      if (kind === "VP8X" && length === 10) info = dimensions(1 + bytes.readUIntLE(data + 4, 3), 1 + bytes.readUIntLE(data + 7, 3), "image/webp");
+      if (kind === "VP8 " && length >= 10 && bytes.subarray(data + 3, data + 6).equals(Buffer.from([157, 1, 42]))) {
+        pixels = true;
+        info ??= dimensions(bytes.readUInt16LE(data + 6) & 16383, bytes.readUInt16LE(data + 8) & 16383, "image/webp");
+      }
+      if (kind === "VP8L" && length >= 5 && bytes[data] === 47) {
+        pixels = true;
+        const bits = bytes.readUInt32LE(data + 1);
+        info ??= dimensions((bits & 16383) + 1, (bits >>> 14 & 16383) + 1, "image/webp");
+      }
+      offset = data + length + length % 2;
+    }
+    if (info && pixels && offset === bytes.length) return info;
+  }
+  reject("INVALID_IMAGE", "Use a valid PNG, JPEG, or WebP image. Other file types are not uploaded.");
+}
+async function sourceImage(path) {
+  if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) reject("INVALID_SOURCE", "Select one absolute local image path to edit.");
+  let handle;
+  try {
+    handle = await open2(path, "r");
+    const before = await handle.stat();
+    if (!before.isFile() || before.size > MAX_IMAGE_BYTES) reject("INVALID_SOURCE", "Select a local image file no larger than 25 MB.");
+    const bytes = Buffer.alloc(Math.min(before.size + 1, MAX_IMAGE_BYTES + 1));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!read.bytesRead) break;
+      offset += read.bytesRead;
+    }
+    if (offset !== before.size) reject("INVALID_SOURCE", "The selected image changed while it was being read. Select it again.");
+    const data = bytes.subarray(0, offset);
+    return { bytes: data, ...rasterInfo(data) };
+  } catch (error62) {
+    if (error62 instanceof ImageProviderError) throw error62;
+    reject("INVALID_SOURCE", "The selected local image could not be read. Check its location and access.");
+  } finally {
+    await handle?.close();
+  }
+}
+async function privateDirectory(directory) {
+  if (!isAbsolute(directory)) reject("INVALID_DIRECTORY", "The image output directory must be an absolute path.");
+  try {
+    await mkdir2(directory, { recursive: true, mode: 448 });
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) reject("INVALID_DIRECTORY", "The image output directory must be a real directory.");
+    await chmod(directory, 448);
+  } catch (error62) {
+    if (error62 instanceof ImageProviderError) throw error62;
+    reject("STORAGE_ERROR", "The image output directory is not writable.");
+  }
+}
+async function writePrivate(path, data) {
+  const handle = await open2(path, "wx", 384);
+  try {
+    await handle.writeFile(data);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+async function replaceRecord(path, record2) {
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writePrivate(temp, JSON.stringify(record2));
+    await rename2(temp, path);
+  } finally {
+    await unlink2(temp).catch(() => {
+    });
+  }
+}
+async function readResponse(response) {
+  const declared = Number(response.headers?.get("content-length"));
+  if (declared > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    reject("INVALID_RESPONSE", "The image provider returned a response larger than the supported limit.");
+  }
+  if (!response.body?.getReader) reject("INVALID_RESPONSE", "The image provider returned no image data.");
+  const reader = response.body.getReader();
+  const parts = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        reject("INVALID_RESPONSE", "The image provider returned a response larger than the supported limit.");
+      }
+      parts.push(Buffer.from(value));
+    }
+    return JSON.parse(Buffer.concat(parts).toString("utf8"));
+  } catch (error62) {
+    if (error62 instanceof ImageProviderError) throw error62;
+    reject("INVALID_RESPONSE", "The image provider returned incomplete or invalid image data.");
+  } finally {
+    reader.releaseLock();
+  }
+}
+async function generateCampaignImage(input2, { env = process.env, fetchImpl = globalThis.fetch, outputDirectory = DEFAULT_DIRECTORY, timeoutMs = 18e4 } = {}) {
+  const status = getImageProviderStatus({ env });
+  if (!status.enabled) reject("PROVIDER_DISABLED", status.reason);
+  if (input2?.userConfirmed !== true) reject("CONFIRMATION_REQUIRED", "Ask the user to approve this separately billed image request and any selected image upload first.");
+  if (typeof input2.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(input2.requestId)) reject("INVALID_REQUEST", "Use a requestId of 1\u2013100 letters, numbers, dots, underscores, or hyphens. Reuse it to recover this request.");
+  if (typeof input2.prompt !== "string" || input2.prompt.trim().length < 1 || input2.prompt.length > 8e3) reject("INVALID_PROMPT", "Describe the image in 1\u20138,000 characters.");
+  const size = input2.size ?? "1024x1024", quality = input2.quality ?? "medium";
+  if (!SIZES.has(size) || !["low", "medium", "high"].includes(quality) || input2.transparentBackground !== void 0 && typeof input2.transparentBackground !== "boolean") reject("INVALID_OPTIONS", "Choose a supported image size, quality, and background option.");
+  if (input2.n !== void 0 && input2.n !== 1) reject("INVALID_OPTIONS", "Each request creates exactly one image.");
+  const source = input2.sourcePath === void 0 ? null : await sourceImage(input2.sourcePath);
+  const body = { model: status.model, prompt: input2.prompt.trim(), n: 1, size, quality, output_format: "png", background: input2.transparentBackground ? "transparent" : "opaque", ...source ? { images: [{ image_url: `data:${source.mimeType};base64,${source.bytes.toString("base64")}` }] } : {} };
+  const fingerprint = hash2(JSON.stringify(body));
+  await privateDirectory(outputDirectory);
+  const requestsDirectory = join2(outputDirectory, ".requests");
+  await privateDirectory(requestsDirectory);
+  const recordPath = join2(requestsDirectory, `${hash2(input2.requestId)}.json`);
+  const record2 = { schemaVersion: 1, requestId: input2.requestId, fingerprint, status: "pending", createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+  try {
+    await writePrivate(recordPath, JSON.stringify(record2));
+  } catch (error62) {
+    if (error62.code !== "EEXIST") reject("STORAGE_ERROR", "Could not record the image request. No request was sent.");
+    let existing;
+    try {
+      existing = JSON.parse(await readFile2(recordPath, "utf8"));
+    } catch {
+      reject("REQUEST_UNCERTAIN", "This request already has a recovery record that cannot be read. It was not sent again.");
+    }
+    if (existing.fingerprint !== fingerprint) reject("REQUEST_CONFLICT", "This requestId belongs to different image instructions. No request was sent.");
+    if (existing.status === "complete" && existing.result && /^[0-9a-f-]{36}\.png$/.test(basename(existing.result.path)) && existing.result.path === join2(outputDirectory, basename(existing.result.path))) {
+      try {
+        if (hash2(await readFile2(existing.result.path)) === existing.result.sha256) return { ...existing.result, recovered: true };
+      } catch {
+      }
+      reject("OUTPUT_MISSING", "The completed image is missing or changed. This paid request was not sent again.");
+    }
+    reject("REQUEST_UNCERTAIN", "This request is pending, failed, or has an unknown outcome. It was not sent again. Check the generated-image folder and provider activity before approving a new requestId.");
+  }
+  let savedPath;
+  try {
+    const signal = AbortSignal.timeout(Math.min(18e4, Math.max(1, timeoutMs)));
+    let response;
+    try {
+      response = await fetchImpl(`https://api.openai.com/v1/images/${source ? "edits" : "generations"}`, {
+        method: "POST",
+        redirect: "error",
+        signal,
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.FIGMA_IMAGE_API_KEY.trim()}` },
+        body: JSON.stringify(body)
+      });
+    } catch {
+      reject("REQUEST_UNCERTAIN", "The image request timed out or could not complete. Its outcome may be unknown; it will not be retried automatically.");
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      const message = response.status === 401 || response.status === 403 ? "The image provider rejected access. Ask your administrator to check API credentials and model access." : response.status === 429 ? "The image provider's usage or rate limit was reached. Ask your administrator to check the account." : "The image provider did not complete the request. Check provider activity before approving another request.";
+      reject("PROVIDER_ERROR", message);
+    }
+    const data = await readResponse(response);
+    const encoded = data?.data?.[0]?.b64_json;
+    if (!Array.isArray(data?.data) || data.data.length !== 1 || typeof encoded !== "string" || encoded.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) reject("INVALID_RESPONSE", "The image provider did not return one supported PNG image.");
+    const bytes = Buffer.from(encoded, "base64");
+    const info = rasterInfo(bytes);
+    if (info.mimeType !== "image/png" || `${info.width}x${info.height}` !== size) reject("INVALID_RESPONSE", "The image provider returned a different format or size than requested.");
+    savedPath = join2(outputDirectory, `${randomUUID()}.png`);
+    await writePrivate(savedPath, bytes);
+    const result = { requestId: input2.requestId, path: savedPath, ...info, bytes: bytes.length, sha256: hash2(bytes), provider: "openai", model: status.model, operation: source ? "edit" : "generate", quality, transparentBackground: Boolean(input2.transparentBackground), createdAt: (/* @__PURE__ */ new Date()).toISOString(), promptSha256: hash2(body.prompt), ...source ? { sourceSha256: hash2(source.bytes) } : {}, nextStep: "Review this image before placing it in the campaign with figma_place_local_image. The image has not been added to Figma." };
+    await writePrivate(`${savedPath}.json`, `${JSON.stringify(result, null, 2)}
+`);
+    await replaceRecord(recordPath, { ...record2, status: "complete", result });
+    return result;
+  } catch (error62) {
+    await replaceRecord(recordPath, { ...record2, status: "uncertain", ...savedPath ? { savedFilename: basename(savedPath) } : {} }).catch(() => {
+    });
+    if (error62 instanceof ImageProviderError) throw error62;
+    reject("REQUEST_UNCERTAIN", "The image request could not be completed or saved. Check the generated-image folder before approving another request; it was not retried automatically.");
+  }
+}
+
 // server.mjs
 var host = process.env.FIGMA_BRIDGE_HOST ?? "127.0.0.1";
 if (!["127.0.0.1", "::1"].includes(host)) throw new Error("FIGMA_BRIDGE_HOST must be a loopback IP (127.0.0.1 or ::1).");
@@ -36904,14 +37313,14 @@ var replacedSessionRetentionMs = 5 * 6e4;
 var proxyHealthIntervalMs = 2e3;
 var operationRetentionMs = 60 * 6e4;
 var operationHardTimeoutMs = 30 * 6e4;
-var bridgeVersion = "0.14.2-local.4";
+var bridgeVersion = "0.14.2-local.5";
 var trackedCompositionCapability = "tracked-composition-v1";
 var compositionImageCapability = "composition-image-audit-v2";
-var exportDirectory = process.env.FIGMA_EXPORT_DIR ?? join2(homedir(), "Pictures", "Figma MCP Exports");
-var preferencesDirectory = process.env.FIGMA_PREFERENCES_DIR ?? join2(homedir(), ".figma-local-bridge");
-var preferencesPath = join2(preferencesDirectory, "preferences.json");
-var preferencesLockPath = join2(preferencesDirectory, "preferences.lock");
-var apiSettingsPath = join2(preferencesDirectory, "api-settings.json");
+var exportDirectory = process.env.FIGMA_EXPORT_DIR ?? join3(homedir2(), "Pictures", "Figma MCP Exports");
+var preferencesDirectory = process.env.FIGMA_PREFERENCES_DIR ?? join3(homedir2(), ".figma-local-bridge");
+var preferencesPath = join3(preferencesDirectory, "preferences.json");
+var preferencesLockPath = join3(preferencesDirectory, "preferences.lock");
+var apiSettingsPath = join3(preferencesDirectory, "api-settings.json");
 var apiDisabled = process.env.FIGMA_BRIDGE_API_DISABLED === "1";
 var environmentFigmaAccessToken = process.env.FIGMA_ACCESS_TOKEN?.trim();
 var configuredFigmaFileKey = process.env.FIGMA_FILE_KEY?.trim();
@@ -37193,7 +37602,7 @@ function pumpTargetLease(session) {
   if (targetFences.has(session.clientId) || session.lease || session.pending.size > 0 || !session.leaseWaiters?.length || !sessions.has(session.sessionId)) return;
   const waiter = session.leaseWaiters.shift();
   clearTimeout(waiter.timer);
-  const lease = { id: randomUUID(), timer: null };
+  const lease = { id: randomUUID2(), timer: null };
   session.lease = lease;
   lease.timer = setTimeout(() => releaseTargetLease(session, lease.id), leaseDurationMs);
   lease.timer.unref?.();
@@ -37202,12 +37611,12 @@ function pumpTargetLease(session) {
 function acquireTargetLease(targetId, sessionId) {
   const session = connectedSession(targetId, sessionId);
   if (targetFences.has(session.clientId)) throw new Error(`Target has an uncertain operation ${targetFences.get(session.clientId).operationId}. Inspect operation status and the document before recovery; no command was sent.`);
-  return new Promise((resolve, reject) => {
-    const waiter = { resolve, reject, timer: null };
+  return new Promise((resolve, reject2) => {
+    const waiter = { resolve, reject: reject2, timer: null };
     waiter.timer = setTimeout(() => {
       const i = session.leaseWaiters.indexOf(waiter);
       if (i !== -1) session.leaseWaiters.splice(i, 1);
-      reject(new Error("The target is busy. No command was sent; retry after its current operation completes."));
+      reject2(new Error("The target is busy. No command was sent; retry after its current operation completes."));
     }, 6e4);
     session.leaseWaiters.push(waiter);
     pumpTargetLease(session);
@@ -37286,9 +37695,9 @@ var statusPage = `<!doctype html>
 </html>`;
 function cleanOperations(now = Date.now()) {
   if (operations.size > 256) {
-    for (const [id, operation] of operations) {
+    for (const [id2, operation] of operations) {
       if (operations.size <= 256) break;
-      if (["succeeded", "failed", "unknown"].includes(operation.state)) operations.delete(id);
+      if (["succeeded", "failed", "unknown"].includes(operation.state)) operations.delete(id2);
     }
   }
   for (const [operationId, operation] of operations) {
@@ -37360,7 +37769,7 @@ function settleOperation(operation, state, value) {
 function createTrackedOperation(session, name, input2, requestedId) {
   cleanOperations();
   if (requestedId !== void 0 && (typeof requestedId !== "string" || !requestedId.trim() || requestedId.length > 200)) throw new Error("A valid operation ID is required.");
-  const operationId = requestedId ?? randomUUID();
+  const operationId = requestedId ?? randomUUID2();
   const fingerprint = JSON.stringify(input2);
   const existing = operations.get(operationId);
   if (existing) {
@@ -37368,10 +37777,10 @@ function createTrackedOperation(session, name, input2, requestedId) {
     return { operation: existing, created: false };
   }
   let resolve;
-  let reject;
+  let reject2;
   const completion = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
-    reject = rejectPromise;
+    reject2 = rejectPromise;
   });
   completion.catch(() => {
   });
@@ -37394,7 +37803,7 @@ function createTrackedOperation(session, name, input2, requestedId) {
     error: null,
     completion,
     resolve,
-    reject
+    reject: reject2
   };
   const command = { id: operationId, operationId, targetId: session.clientId, name, input: input2 };
   const timeout = setTimeout(() => {
@@ -37419,12 +37828,12 @@ async function waitForOperation(operation, timeoutMs) {
   try {
     return await Promise.race([
       operation.completion,
-      new Promise((_, reject) => {
+      new Promise((_, reject2) => {
         timeout = setTimeout(() => {
           const error62 = new Error(`Figma operation ${operation.id} is still ${operation.state} after ${Math.round(timeoutMs / 1e3)} seconds. Call figma_operation_status with this operation ID before retrying.`);
           error62.code = "OPERATION_STILL_RUNNING";
           error62.operationId = operation.id;
-          reject(error62);
+          reject2(error62);
         }, timeoutMs);
       })
     ]);
@@ -37703,19 +38112,19 @@ var bridge = http.createServer(async (request, response) => {
 function sendLocalCommand(name, input2, timeoutMs = 3e4, options = {}) {
   const session = connectedSession(options.targetId, options.sessionId);
   checkTargetLease(session, options.leaseId);
-  const id = randomUUID();
-  const command = { id, targetId: session.clientId, name, input: input2 };
-  const result = new Promise((resolve, reject) => {
+  const id2 = randomUUID2();
+  const command = { id: id2, targetId: session.clientId, name, input: input2 };
+  const result = new Promise((resolve, reject2) => {
     const timeout = setTimeout(() => {
-      session.pending.delete(id);
-      const queuedIndex = session.queue.findIndex((queued) => queued.id === id);
+      session.pending.delete(id2);
+      const queuedIndex = session.queue.findIndex((queued) => queued.id === id2);
       if (queuedIndex !== -1) session.queue.splice(queuedIndex, 1);
       const outcome = queuedIndex !== -1 ? "The command was not dispatched and has been removed from the queue. Confirm the bridge plugin is still open and connected." : "The command was dispatched, so its outcome is unknown. Re-read the affected Figma state before retrying.";
-      if (queuedIndex === -1) fenceTarget(session, id, outcome);
-      reject(new Error(`Figma did not respond within ${Math.round(timeoutMs / 1e3)} seconds. ${outcome}`));
+      if (queuedIndex === -1) fenceTarget(session, id2, outcome);
+      reject2(new Error(`Figma did not respond within ${Math.round(timeoutMs / 1e3)} seconds. ${outcome}`));
       pumpTargetLease(session);
     }, timeoutMs);
-    session.pending.set(id, { id, resolve, reject, timeout, dispatched: false });
+    session.pending.set(id2, { id: id2, resolve, reject: reject2, timeout, dispatched: false });
   });
   session.queue.push(command);
   completePoll(session);
@@ -37806,7 +38215,7 @@ async function sendCommand(name, input2, timeoutMs = 3e4) {
 async function sendTrackedCommand(name, input2, options = {}) {
   const context = targetContext.getStore();
   options = { ...commandRouting(), ...options };
-  const operationId = options.operationId ?? context?.operationId ?? randomUUID();
+  const operationId = options.operationId ?? context?.operationId ?? randomUUID2();
   try {
     await initialBridgeRole;
     if (bridgeRole === "owner") return await sendTrackedLocalCommand(name, input2, { ...options, operationId });
@@ -37864,10 +38273,10 @@ async function writePngExport(data) {
   const bytes = Buffer.from(imageBase64, "base64");
   if (bytes.length === 0) throw new Error("Figma returned an empty PNG export.");
   if (bytes.length > 50 * 1024 * 1024) throw new Error("PNG export exceeds the 50 MB local safety limit. Reduce maxDimension or scale.");
-  await mkdir2(exportDirectory, { recursive: true });
+  await mkdir3(exportDirectory, { recursive: true });
   const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-  const filename = `${safeFileStem(nodeName)}-${timestamp}-${randomUUID().slice(0, 8)}.png`;
-  const path = join2(exportDirectory, filename);
+  const filename = `${safeFileStem(nodeName)}-${timestamp}-${randomUUID2().slice(0, 8)}.png`;
+  const path = join3(exportDirectory, filename);
   await writeFile2(path, bytes, { flag: "wx" });
   return { ...metadata, nodeName, path, bytes: bytes.length };
 }
@@ -37920,7 +38329,7 @@ function isPublicAddress(address) {
   return false;
 }
 async function requestRemoteImage(url2, address) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, reject2) => {
     const request = https.request(url2, {
       method: "GET",
       headers: {
@@ -37939,13 +38348,13 @@ async function requestRemoteImage(url2, address) {
       }
       if (status !== 200) {
         response.resume();
-        reject(new Error(`Image URL returned HTTP ${status}.`));
+        reject2(new Error(`Image URL returned HTTP ${status}.`));
         return;
       }
       const declaredLength = Number(response.headers["content-length"]);
       if (Number.isFinite(declaredLength) && declaredLength > maxImageBytes) {
         response.resume();
-        reject(new Error("Remote image exceeds the 25 MB safety limit."));
+        reject2(new Error("Remote image exceeds the 25 MB safety limit."));
         return;
       }
       const chunks = [];
@@ -37959,10 +38368,10 @@ async function requestRemoteImage(url2, address) {
         chunks.push(chunk);
       });
       response.on("end", () => resolve({ bytes: Buffer.concat(chunks) }));
-      response.on("error", reject);
+      response.on("error", reject2);
     });
     request.setTimeout(15e3, () => request.destroy(new Error("Remote image request timed out.")));
-    request.on("error", reject);
+    request.on("error", reject2);
     request.end();
   });
 }
@@ -37993,8 +38402,8 @@ async function localImageInput(input2) {
   let bytes;
   let sourcePath;
   if (hasPath) {
-    if (!isAbsolute(input2.path)) throw new Error("Local image path must be absolute.");
-    bytes = await readFile2(input2.path);
+    if (!isAbsolute2(input2.path)) throw new Error("Local image path must be absolute.");
+    bytes = await readFile3(input2.path);
     sourcePath = input2.path;
     if (bytes.length > maxImageBytes) throw new Error("The approved local image exceeds the 25 MB safety limit.");
   } else {
@@ -38202,7 +38611,7 @@ function emptyPreferenceStore() {
 async function readPreferenceStore() {
   let contents;
   try {
-    contents = await readFile2(preferencesPath, "utf8");
+    contents = await readFile3(preferencesPath, "utf8");
   } catch (error62) {
     if (error62?.code === "ENOENT") return emptyPreferenceStore();
     throw error62;
@@ -38214,18 +38623,18 @@ async function readPreferenceStore() {
   }
 }
 async function writePreferenceStore(store) {
-  await mkdir2(preferencesDirectory, { recursive: true, mode: 448 });
-  const temporaryPath = join2(preferencesDirectory, `preferences.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir3(preferencesDirectory, { recursive: true, mode: 448 });
+  const temporaryPath = join3(preferencesDirectory, `preferences.${process.pid}.${randomUUID2()}.tmp`);
   await writeFile2(temporaryPath, `${JSON.stringify(preferenceStore.parse(store), null, 2)}
 `, { mode: 384 });
-  await rename2(temporaryPath, preferencesPath);
+  await rename3(temporaryPath, preferencesPath);
 }
 async function withPreferenceLock(callback) {
-  await mkdir2(preferencesDirectory, { recursive: true, mode: 448 });
+  await mkdir3(preferencesDirectory, { recursive: true, mode: 448 });
   let handle;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
-      handle = await open2(preferencesLockPath, "wx", 384);
+      handle = await open3(preferencesLockPath, "wx", 384);
       await handle.writeFile(`${process.pid} ${Date.now()}
 `);
       break;
@@ -38233,7 +38642,7 @@ async function withPreferenceLock(callback) {
       if (error62?.code !== "EEXIST") throw error62;
       try {
         const lockStatus = await stat(preferencesLockPath);
-        if (Date.now() - lockStatus.mtimeMs > 15e3) await unlink2(preferencesLockPath);
+        if (Date.now() - lockStatus.mtimeMs > 15e3) await unlink3(preferencesLockPath);
       } catch (lockError) {
         if (lockError?.code !== "ENOENT") throw lockError;
       }
@@ -38246,7 +38655,7 @@ async function withPreferenceLock(callback) {
   } finally {
     await handle.close().catch(() => {
     });
-    await unlink2(preferencesLockPath).catch(() => {
+    await unlink3(preferencesLockPath).catch(() => {
     });
   }
 }
@@ -38305,7 +38714,7 @@ async function setUserPreference(input2) {
     if (input2.preferenceId && existingIndex < 0) throw new Error(`Preference ${input2.preferenceId} was not found. Re-read preferences before updating.`);
     const existing = existingIndex >= 0 ? store.preferences[existingIndex] : null;
     const preference = storedPreference.parse({
-      id: existing?.id ?? randomUUID(),
+      id: existing?.id ?? randomUUID2(),
       designSystem: input2.designSystem,
       category: input2.category,
       rule: input2.rule,
@@ -38413,7 +38822,7 @@ async function resolveDesignChoice(input2) {
 async function readApiSettings() {
   let contents;
   try {
-    contents = await readFile2(apiSettingsPath, "utf8");
+    contents = await readFile3(apiSettingsPath, "utf8");
   } catch (error62) {
     if (error62?.code === "ENOENT") return { defaultFileKey: null };
     throw error62;
@@ -38426,11 +38835,11 @@ async function readApiSettings() {
   }
 }
 async function writeApiSettings(settings) {
-  await mkdir2(preferencesDirectory, { recursive: true, mode: 448 });
-  const temporaryPath = join2(preferencesDirectory, `api-settings.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir3(preferencesDirectory, { recursive: true, mode: 448 });
+  const temporaryPath = join3(preferencesDirectory, `api-settings.${process.pid}.${randomUUID2()}.tmp`);
   await writeFile2(temporaryPath, `${JSON.stringify({ schemaVersion: 1, defaultFileKey: settings.defaultFileKey }, null, 2)}
 `, { mode: 384 });
-  await rename2(temporaryPath, apiSettingsPath);
+  await rename3(temporaryPath, apiSettingsPath);
 }
 function validateFigmaAccessToken(value) {
   if (typeof value !== "string" || value.length < 8 || value.length > 4e3 || /\s/.test(value)) {
@@ -38503,7 +38912,7 @@ async function saveOwnerApiCredentials(input2) {
 async function clearOwnerApiCredentials() {
   if (environmentFigmaAccessToken) throw new Error("FIGMA_ACCESS_TOKEN is managed by the MCP environment and cannot be removed from the plugin.");
   await credentialStore.delete();
-  await unlink2(apiSettingsPath).catch((error62) => {
+  await unlink3(apiSettingsPath).catch((error62) => {
     if (error62?.code !== "ENOENT") throw error62;
   });
   lastApiCapabilityCheck = null;
@@ -38644,6 +39053,7 @@ async function deleteComment(input2) {
   return { fileKey: configuration.fileKey, fileKeySource: configuration.source, deletedCommentId: input2.commentId };
 }
 var workflowInstructions = [
+  campaignInstructions,
   "Use this server with the inspect-first $figma-local-workflow skill when available.",
   "For best first-pass results, always follow this order:",
   "1. figma_list_connections \u2014 choose a runtime targetId, stableTargetRef (file:<key>), or exact namedTargetRef (name:<saved label/documentName>) for each canvas call. Switching is per-call; never guess from focus or page names, fuzzy-match names, or choose among duplicate names.",
@@ -38679,7 +39089,9 @@ var server = new McpServer(
 var registerTool = server.registerTool.bind(server);
 server.registerTool = (name, config2, callback) => {
   if (apiDisabled && ["figma_comment_status", "figma_list_comments", "figma_post_comment", "figma_delete_comment"].includes(name)) return void 0;
-  const canvas = /send(?:Tracked)?Command\(/.test(String(callback));
+  const { localCanvas = false, ...publicConfig } = config2;
+  config2 = publicConfig;
+  const canvas = localCanvas || /send(?:Tracked)?Command\(/.test(String(callback));
   if (!canvas) return registerTool(name, config2, callback);
   const fields = {
     targetId: external_exports.string().trim().min(1).max(220).optional().describe("Per-call target: exact runtime ID, file:<key>, or name:<saved label/documentName> from figma_list_connections. A unique exact saved name also works. Never fuzzy-match or use a page name. Overrides only this call's per-proxy FIGMA_BRIDGE_TARGET default."),
@@ -38704,7 +39116,7 @@ server.registerTool = (name, config2, callback) => {
         return ownerRequest(`/v1/lease/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, action === "acquire" ? 65e3 : 5e3);
       };
       lease = await callOwner("acquire", { targetId: target.targetId, sessionId: target.sessionId });
-      const context = { ...lease, operationId: input2.operationId ?? randomUUID(), commandIndex: 0 };
+      const context = { ...lease, operationId: input2.operationId ?? randomUUID2(), commandIndex: 0 };
       let renewing = false;
       renewTimer = setInterval(async () => {
         if (renewing) return;
@@ -39743,6 +40155,17 @@ server.registerTool("figma_list_fonts", {
     return failure2(error62);
   }
 });
+server.registerTool("figma_rename_node", {
+  title: "Name a Figma layer",
+  description: "Rename one verified current-page layer, for example to establish a campaign template's Headline, Body, CTA, Image, Logo or Disclaimer role. Active campaign protection requires the layer to belong to an editable draft; renaming invalidates its previous review.",
+  inputSchema: { nodeId: external_exports.string().trim().min(1).max(200), name: external_exports.string().trim().min(1).max(200) }
+}, async (input2) => {
+  try {
+    return output2(await sendCommand("renameNode", input2));
+  } catch (error62) {
+    return failure2(error62);
+  }
+});
 server.registerTool("figma_set_auto_layout", {
   title: "Set Figma auto-layout",
   description: "Apply or remove auto-layout on a selected frame, component, or instance. This is destructive only to the node's layout settings, not its children.",
@@ -39755,6 +40178,37 @@ server.registerTool("figma_set_auto_layout", {
 }, async (input2) => {
   try {
     return output2(await sendCommand("setAutoLayout", input2));
+  } catch (error62) {
+    return failure2(error62);
+  }
+});
+registerCampaignTools(server, { sendCommand, output: output2, failure: failure2, imageOutput, writePngExport });
+server.registerTool("figma_image_provider_status", {
+  title: "Check optional image generation",
+  description: "Report whether an administrator configured the optional paid image provider. Never returns credentials. Disabled by default; no network request is made by this check.",
+  inputSchema: {}
+}, async () => {
+  try {
+    return output2(getImageProviderStatus({ env: process.env }));
+  } catch (error62) {
+    return failure2(error62);
+  }
+});
+server.registerTool("figma_generate_campaign_image", {
+  title: "Generate or edit an approved campaign image",
+  description: "Optional paid provider request, only after the user authorizes this image/prompt. Check provider status first. One image per request. Reuse requestId for recovery; never create a second ID to retry an uncertain request. An optional approved local sourcePath edits that image. Returns a local file and provenance; it does not place artwork or change Figma. Never ask for or include an API key in tool inputs.",
+  inputSchema: {
+    requestId: external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/),
+    prompt: external_exports.string().trim().min(1).max(8e3),
+    userConfirmed: external_exports.literal(true),
+    sourcePath: external_exports.string().max(4e3).optional(),
+    size: external_exports.enum(["1024x1024", "1536x1024", "1024x1536"]).default("1024x1024"),
+    quality: external_exports.enum(["low", "medium", "high"]).default("medium"),
+    transparentBackground: external_exports.boolean().default(false)
+  }
+}, async (input2) => {
+  try {
+    return output2(await generateCampaignImage(input2, { env: process.env, outputDirectory: join3(exportDirectory, "Generated Campaign Images") }));
   } catch (error62) {
     return failure2(error62);
   }

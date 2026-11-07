@@ -65,6 +65,13 @@ function staffInstructions(extensionName) {
 <h2>3 Ask Claude to check the file</h2>
 <ol><li>Choose the task to check your file, then click <b>Copy instructions for Claude</b>.</li><li>Paste into a regular Claude Desktop chat. Check that Claude confirms the correct file and page before working.</li><li>For an edit, select the design in Figma and click <b>Work on a copy</b>. This creates a duplicate immediately and selects it.</li><li>Choose a marketing task, add your details, and copy the updated instructions into Claude. Check the result in Figma.</li></ol>
 <p>Task templates help you change a headline, create a campaign variation, or export selected graphics. They prepare instructions for Claude; copying a prompt does not run it.</p>
+<h2>4 Create a campaign</h2>
+<ol><li>Open <b>Campaign Studio</b> in the plugin. Import the brand kit Arsenio provides, or save your approved colours, fonts and writing guidance.</li>
+<li>Select a source artboard, enter your audience, offer and call to action, and prepare three concept workspaces.</li>
+<li>Copy the campaign brief into Claude. Claude develops the three directions and reviews rendered previews. Preparing workspaces alone does not generate a finished design.</li>
+<li>Compare the designs, choose one, and approve it after its checks and visual review are complete.</li>
+<li>Create the sizes you need, review and approve each, then ask Claude to export the approved campaign. Save a checkpoint before requesting changes.</li></ol>
+<p>Read <b>CAMPAIGN-STUDIO.md</b> for the walkthrough. Optional image generation stays off unless an administrator enables a separately billed provider. No image API key is needed for ordinary Figma campaign work.</p>
 <p>To undo an edit, click the Figma canvas and press <b>Command Z</b>. A task may contain several edits, so undo one step at a time and inspect the result.</p>
 <h2>Each day</h2><p>Open Claude, open the Figma file, run Local MCP Bridge, and leave the panel open. Check the displayed file and page, then copy fresh instructions for your task. Copy again after changing pages or restarting the plugin.</p>
 <p>If Arsenio helped you install an earlier version using Terminal, ask him to update that installation first. Use this plugin in regular Claude Desktop chats.</p>
@@ -97,6 +104,8 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
   const install = await bytes("docs/claude-desktop.md");
   const deployment = await bytes("docs/team-deployment.md");
   const pilot = await bytes("docs/staff-pilot.md");
+  const campaignGuide = await bytes("docs/campaign-studio.md");
+  const imageGuide = await bytes("docs/image-provider.md");
   const extension = archive({
     "manifest.json": text(`${JSON.stringify(manifest, null, 2)}\n`),
     "icon.png": await bytes("assets/icon.png"),
@@ -105,6 +114,8 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
     "LICENSE": license,
     "THIRD_PARTY_NOTICES.txt": text(await dependencyNotices(bundled.metafile.inputs)),
     "INSTALL.md": install,
+    "CAMPAIGN-STUDIO.md": campaignGuide,
+    "IMAGE-PROVIDER.md": imageGuide,
   });
   const pluginFiles = {
     "figma-local-bridge/manifest.json": await bytes("plugin/manifest.json"),
@@ -137,6 +148,8 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
     "INSTALL.md": install,
     "TEAM-DEPLOYMENT.md": deployment,
     "STAFF-PILOT.md": pilot,
+    "CAMPAIGN-STUDIO.md": campaignGuide,
+    "IMAGE-PROVIDER.md": imageGuide,
     "RELEASE.json": release,
     "SHA256SUMS.txt": text(checksums.split("\n").filter((line) => line.endsWith(extensionName)).join("\n") + "\n"),
   });
@@ -147,6 +160,8 @@ export async function buildDesktopPackages(outputDirectory = join(repository, "b
   await writeFile(join(outputDirectory, "INSTALL.md"), install);
   await writeFile(join(outputDirectory, "TEAM-DEPLOYMENT.md"), deployment);
   await writeFile(join(outputDirectory, "STAFF-PILOT.md"), pilot);
+  await writeFile(join(outputDirectory, "CAMPAIGN-STUDIO.md"), campaignGuide);
+  await writeFile(join(outputDirectory, "IMAGE-PROVIDER.md"), imageGuide);
   await writeFile(join(outputDirectory, "RELEASE.json"), release);
   await writeFile(join(outputDirectory, "START-HERE.html"), instructions);
   await writeFile(join(outputDirectory, "SHA256SUMS.txt"), checksums + `${createHash("sha256").update(kit).digest("hex")}  ${kitName}\n`);

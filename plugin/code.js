@@ -35,10 +35,10 @@ function setPanelView(message) {
 
 let bridgeGeneration = 0;
 const bridgeUrl = "http://localhost:3846";
-const pluginVersion = "0.14.2-local.4";
+const pluginVersion = "0.14.2-local.5";
 const bridgeClientId = `figma-client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const mutatingCommands = new Set([
-  "moveResizeReparent", "updateText", "setTextCase", "deleteNode", "duplicateNode",
+  "moveResizeReparent", "updateText", "setTextCase", "deleteNode", "duplicateNode", "renameNode",
   "createSection", "createFrame", "createText", "createRectangle", "createEllipse",
   "importSvg", "styleNode", "createColorTokens", "setAutoLayout",
   "applyCopyUpdates", "setTextFrame", "splitTextBlock",
@@ -305,6 +305,15 @@ function startBridge() {
   bridgeLoop = runBridge(generation).finally(() => { bridgeLoop = null; });
   return bridgeLoop;
 }
+let pendingCampaignUiAction = null;
+async function waitForCampaignUiAction(sessionId) {
+  while (pendingCampaignUiAction) {
+    let timer;
+    try { await Promise.race([pendingCampaignUiAction, new Promise((resolve) => { timer = setTimeout(resolve, 10000); })]); }
+    finally { clearTimeout(timer); }
+    if (pendingCampaignUiAction) await postHeartbeat(sessionId);
+  }
+}
 async function runBridge(generation) {
   let failures = 0;
   while (generation === bridgeGeneration) {
@@ -332,6 +341,8 @@ async function runBridge(generation) {
         if (command.targetId && command.targetId !== bridgeClientId) throw new Error("Command target does not match this plugin.");
         let payload = completedCommands.get(command.id) || (completedCommandIds.has(command.id) ? completedResultUnavailable() : null);
         if (!payload) {
+          await waitForCampaignUiAction(sessionId);
+          if (generation !== bridgeGeneration) return;
           bridgeCommandInFlight = true;
           bridgeActivity(command, "start");
           try {
@@ -2684,6 +2695,8 @@ async function setVariableValues(input) {
 }
 
 async function execute(name, input, reportProgress = async () => {}) {
+  if (campaignActions.has(name)) return executeCampaign(name, input);
+  await guardCampaignMutation(name, input);
   // A resumed audit must not combine measurements taken before and after bridge edits.
   if (mutatingCommands.has(name)) overflowAuditCursors.clear();
   const refs = new Set();
@@ -3061,6 +3074,14 @@ async function execute(name, input, reportProgress = async () => {}) {
     }
   }
 
+  if (name === "renameNode") {
+    const node = sceneNode(input.nodeId);
+    const name = campaignString(input.name, "Layer name", 200);
+    const previousName = node.name;
+    node.name = name;
+    return { mutatedNodeIds: [node.id], nodeId: node.id, previousName, name };
+  }
+
   if (name === "styleNode") {
     const node = sceneNode(input.nodeId);
     await applyVisualStyle(node, input);
@@ -3156,6 +3177,7 @@ function publishStaffContext(force = false) {
 }
 
 function copyStaffSelection(message) {
+  if (readCampaignStore().activeId) throw new Error("Finish the active campaign before creating unrelated working copies.");
   if (bridgeCommandInFlight || bridgePhase !== "connected" || !bridgeSessionId) throw new Error("Wait until the connection is ready and the current task has finished, then try again.");
   const page = figma.currentPage;
   const originals = [...page.selection];
@@ -3217,6 +3239,25 @@ figma.ui.onmessage = async (message) => {
   }
   if (message.type === "panel-view") { setPanelView(message); return; }
   if (message.type === "staff-refresh-context") { publishStaffContext(true); return; }
+  if (message.type === "campaign-action") {
+    const reply = { type: "campaign-result", requestId: message.requestId, action: message.action };
+    if (bridgeCommandInFlight) { figma.ui.postMessage({ ...reply, ok: false, error: "Wait for the current task to finish." }); return; }
+    bridgeCommandInFlight = true;
+    let releaseCampaignUiAction;
+    pendingCampaignUiAction = new Promise((resolve) => { releaseCampaignUiAction = resolve; });
+    try {
+      if (!campaignActions.has(message.action) || message.action === "campaignReviewEvidence") throw new Error("Unsupported campaign action.");
+      if (message.input?.pageId && message.input.pageId !== figma.currentPage.id) throw new Error("The page changed. Refresh your campaign before continuing.");
+      if (message.action === "campaignStart") {
+        const expected = new Set(message.input?.nodeIds || []), selected = figma.currentPage.selection;
+        if (expected.size !== selected.length || !selected.every((node) => expected.has(node.id))) throw new Error("Your selection changed. Select the starting artboards again.");
+      }
+      const data = await executeCampaign(message.action, message.input || {});
+      figma.ui.postMessage({ ...reply, ok: true, data });
+    } catch (error) { figma.ui.postMessage({ ...reply, ok: false, error: errorMessage(error) }); }
+    finally { bridgeCommandInFlight = false; pendingCampaignUiAction = null; releaseCampaignUiAction(); publishStaffContext(true); }
+    return;
+  }
   if (message.type === "staff-copy-selection") {
     try { figma.ui.postMessage(copyStaffSelection(message)); }
     catch (error) { figma.ui.postMessage({ type: "staff-error", error: errorMessage(error) }); publishStaffContext(); }
@@ -5783,3 +5824,398 @@ async function executeDesignSystem(name, input) {
   throw new Error(`Unsupported design-system command: ${name}`);
 }
 // ===== End design-system extension =====
+
+// Campaign Studio uses document-owned records, so history travels with the file.
+// The active job limits bridge mutations to draft descendants, independently of prompts.
+const campaignStoreKey = "figma_local_bridge.campaigns.v1";
+const campaignActions = new Set(["brandKitSave", "brandKitList", "brandKitGet", "campaignStart", "campaignStatus", "campaignReview", "campaignRecordReview", "campaignApprove", "campaignCheckpoint", "campaignRestore", "campaignAdapt", "campaignPreview", "campaignShow", "campaignFinish", "campaignResume", "campaignExportPlan"]);
+for (const action of campaignActions) if (!/List$|Get$|Status$|Review$|Preview$|Show$|ExportPlan$/.test(action)) mutatingCommands.add(action);
+const campaignDirections = [
+  { id: "product", name: "Product focused", guidance: "Lead with the product image, one clear benefit, and a prominent action." },
+  { id: "bold", name: "Bold promotion", guidance: "Lead with the offer and strong typographic hierarchy; use approved accent colours." },
+  { id: "editorial", name: "Editorial story", guidance: "Lead with an engaging story, generous space, and restrained image and type treatments." },
+];
+function readCampaignStore() {
+  const raw = figma.root.getPluginData?.(campaignStoreKey);
+  if (!raw) return { schemaVersion: 1, activeId: null, kits: [], campaigns: [] };
+  let store; try { store = JSON.parse(raw); } catch { throw new Error("Campaign history is unreadable. Restore the file's previous version before editing."); }
+  if (store.schemaVersion !== 1 || !Array.isArray(store.kits) || !Array.isArray(store.campaigns)) throw new Error("This campaign history needs a newer plugin.");
+  return store;
+}
+function saveCampaignStore(store) {
+  const value = JSON.stringify(store);
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) { const code = value.charCodeAt(index); if (code < 128) bytes++; else if (code < 2048) bytes += 2; else if (code >= 0xD800 && code <= 0xDBFF && index + 1 < value.length && value.charCodeAt(index + 1) >= 0xDC00 && value.charCodeAt(index + 1) <= 0xDFFF) { bytes += 4; index++; } else bytes += 3; }
+  if (bytes > 90000) throw new Error("Campaign history is full. Use a new Figma file for another campaign; existing work was retained.");
+  if (!figma.root.setPluginData) throw new Error("This document cannot save campaign history.");
+  figma.root.setPluginData(campaignStoreKey, value);
+}
+function campaignString(value, label, maximum = 2000, required = true) {
+  if (typeof value !== "string" || value.length > maximum || (required && !value.trim())) throw new Error(`${label} must be ${required ? "nonempty " : ""}text of at most ${maximum} characters.`);
+  return value.trim();
+}
+function campaignId(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`; }
+function campaignFind(store, id) {
+  const campaign = store.campaigns.find((item) => item.id === (id || store.activeId));
+  if (!campaign) throw new Error("Choose an existing campaign or start a new one.");
+  if (campaign.pageId !== figma.currentPage.id) throw new Error("Open the campaign's original Figma page before continuing.");
+  return campaign;
+}
+function campaignVariant(campaign, id) {
+  const variant = [...campaign.concepts, ...campaign.formats].find((item) => item.id === id);
+  if (!variant) throw new Error("Choose a campaign concept or adapted format.");
+  return variant;
+}
+function campaignResult(campaign, extra = {}) { return { campaign, ...extra }; }
+async function campaignNodes(ids) {
+  const nodes = [];
+  for (const id of ids) {
+    const node = await figma.getNodeByIdAsync(id);
+    let parent = node; while (parent && parent.type !== "PAGE") parent = parent.parent;
+    if (!node || node.removed || parent?.id !== figma.currentPage.id) throw new Error(`Campaign layer ${id} is missing or on another page. Restore it using Figma history.`);
+    indexedCurrentPageNodes.set(id, node); nodes.push(node);
+  }
+  return nodes;
+}
+function campaignWalk(roots, maximum = 5000) {
+  const nodes = [], stack = [...roots].reverse();
+  while (stack.length) {
+    if (nodes.length >= maximum) throw new Error(`This design exceeds the ${maximum}-layer campaign limit. Use a smaller artboard.`);
+    const node = stack.pop(); nodes.push(node);
+    if (node.children) stack.push(...[...node.children].reverse());
+  }
+  return nodes;
+}
+function campaignHash(value) {
+  let first = 2166136261, second = 5381;
+  for (let i = 0; i < value.length; i++) { const code = typeof value === "string" ? value.charCodeAt(i) : value[i]; first = Math.imul(first ^ code, 16777619); second = Math.imul(second, 33) ^ code; }
+  return `${(first >>> 0).toString(16)}${(second >>> 0).toString(16)}`;
+}
+async function campaignFingerprint(roots) {
+  const structure = campaignWalk(roots).map((node) => [node.id, node.parent?.id, node.name, node.type, node.x, node.y, node.width, node.height, node.visible, node.opacity, node.characters ?? null]);
+  const pixels = [];
+  for (const root of roots) {
+    if (!root.exportAsync) throw new Error("This artboard cannot be visually verified.");
+    const bytes = await root.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: constrainedScale(root, 2048, 1) } });
+    pixels.push(campaignHash(bytes));
+  }
+  return campaignHash(JSON.stringify([structure, pixels]));
+}
+function campaignIsWithin(node, ids) { for (let current = node; current; current = current.parent) if (ids.has(current.id)) return true; return false; }
+async function guardCampaignMutation(name, input) {
+  const store = readCampaignStore();
+  if (!store.activeId || (!mutatingCommands.has(name) && !name.startsWith("ds"))) return;
+  // Read-only design-system discovery remains available; unrecognised ds commands fail closed.
+  if (["dsPing", "dsLibRegister", "dsIndex", "dsInspect", "dsAuditInstances", "dsUsage", "dsContrastScan", "dsStaleFills", "dsVarModes", "dsCollectionKeys", "dsLibAudit", "dsInspectLayout", "dsFind", "dsParents", "dsImages", "dsImageInfo", "dsLinksTo", "dsAuditDS", "dsTextSegments", "dsComponentSpec", "dsReadGlyphs", "dsReadEffectStyles"].includes(name)) return;
+  const campaign = campaignFind(store);
+  const variants = [...campaign.concepts, ...campaign.formats].filter((item) => item.status === "draft");
+  const rootIds = new Set(variants.flatMap((item) => item.nodeIds));
+  const direct = new Set(["renameNode", "updateText", "setTextCase", "setTextFrame", "splitTextBlock", "styleNode", "setAutoLayout", "moveResizeReparent", "deleteNode"]);
+  const create = new Set(["createFrame", "createText", "createRectangle", "createEllipse", "importSvg", "placeLocalImage", "createComponentInstance"]);
+  let targets = [];
+  if (direct.has(name)) targets = [input.nodeId];
+  else if (create.has(name)) targets = [input.parentId];
+  else if (name === "copyStyleFromNode" || name === "applyDesignStyle") targets = input.targetNodeIds || [];
+  else if (name === "copyImageFill") targets = [input.targetNodeId];
+  else if (name === "applyCopyUpdates") targets = (input.updates || []).map((item) => item.nodeId);
+  else if (name === "composeFrame") {
+    if (input.archiveNodeIds?.length) throw new Error("Campaign compositions cannot archive existing artboards. Create the replacement inside a draft.");
+    targets = [input.frame?.parentId];
+  } else if (name === "duplicateNode") {
+    const [node] = await campaignNodes([input.nodeId]);
+    targets = [node.id, node.parent?.id];
+  } else throw new Error(`Campaign protection blocks ${name}. Use explicit draft-layer tools, or Finish campaign before changing shared styles, variables, pages, or original artwork.`);
+  if (!targets.length || targets.some((id) => !id)) throw new Error("Campaign edits require explicit draft node or parent IDs.");
+  if (name === "moveResizeReparent" && input.parentId) targets.push(input.parentId);
+  const nodes = await campaignNodes(targets);
+  if (nodes.some((node) => !campaignIsWithin(node, rootIds))) throw new Error("Campaign protection: only draft concept layers can be changed. Originals, checkpoints, and approved designs are protected.");
+  if (["deleteNode", "moveResizeReparent"].includes(name) && rootIds.has(input.nodeId) && (name === "deleteNode" || input.parentId)) throw new Error("Keep campaign root artboards in place. Edit their contents instead.");
+  for (const variant of variants) if (nodes.some((node) => campaignIsWithin(node, new Set(variant.nodeIds)))) { variant.review = null; variant.revision = null; }
+  saveCampaignStore(store); // Invalidate before the write; partial failures cannot retain approval.
+}
+function validateBrandKit(value) {
+  if (!value || value.schemaVersion !== 1) throw new Error("Import a brand kit with schemaVersion 1.");
+  const kit = { schemaVersion: 1, id: campaignString(value.id, "Brand ID", 80), name: campaignString(value.name, "Brand name", 100), version: campaignString(value.version, "Brand version", 40), voice: campaignString(value.voice ?? "", "Brand voice", 4000, false), colors: [], fonts: [], rules: [], references: [], templates: [] };
+  if (!/^[a-z0-9_-]+$/i.test(kit.id)) throw new Error("Brand ID may contain letters, digits, underscores and hyphens.");
+  for (const [key, limit] of [["colors", 40], ["fonts", 20], ["rules", 40], ["references", 20], ["templates", 20]]) if (!Array.isArray(value[key] ?? []) || (value[key] ?? []).length > limit) throw new Error(`Brand ${key} must be an array with at most ${limit} entries.`);
+  kit.colors = (value.colors ?? []).map((item) => { const hex = campaignString(item.hex, "Colour hex", 7); if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Brand colours use six-digit hex values, such as #17324D."); return { name: campaignString(item.name, "Colour name", 100), hex: hex.toUpperCase() }; });
+  kit.fonts = (value.fonts ?? []).map((item) => ({ family: campaignString(item.family, "Font family", 100), style: campaignString(item.style ?? "Regular", "Font style", 100) }));
+  kit.rules = (value.rules ?? []).map((item) => campaignString(item, "Brand rule", 500));
+  kit.references = (value.references ?? []).map((item) => campaignString(item, "Brand reference", 1000));
+  kit.templates = (value.templates ?? []).map((item) => ({ name: campaignString(item.name, "Template name", 100), nodeId: campaignString(item.nodeId, "Template node", 100), roles: Object.fromEntries(Object.entries(item.roles || {}).map(([role, id]) => { if (!["headline", "body", "cta", "image", "logo", "disclaimer"].includes(role)) throw new Error("Unknown template role."); return [role, campaignString(id, "Role node", 100)]; })) }));
+  return kit;
+}
+function campaignCloneRoots(roots, label, created) {
+  const page = figma.currentPage;
+  if (roots.some((node) => node.parent !== page || node.removed)) throw new Error("The campaign page or artboard placement changed. Return to the original page before continuing.");
+  const maxX = Math.max(0, ...page.children.filter((node) => Number.isFinite(node.x + node.width)).map((node) => node.x + node.width));
+  const minX = Math.min(...roots.map((node) => node.x));
+  return roots.map((node) => { const copy = node.clone(); created.push(copy); page.appendChild(copy); copy.name = `${node.name} — ${label}`; copy.x = maxX + 120 + node.x - minX; copy.y = node.y; return copy; });
+}
+async function campaignRollback(created, error) {
+  const failed = [];
+  for (const node of [...created].reverse()) { try { if (!node.removed) node.remove(); } catch { failed.push(node.id); } }
+  if (failed.length) throw new Error(`Campaign operation failed. Inspect leftover drafts ${failed.join(", ")} before retrying. ${errorMessage(error)}`);
+  throw error;
+}
+async function campaignStart(input, store) {
+  if (store.activeId) throw new Error("Finish the current campaign before starting another one.");
+  if (store.campaigns.length >= 20) throw new Error("This file already contains 20 campaigns. Start the next campaign in a new file.");
+  if (input.pageId !== figma.currentPage.id) throw new Error("The page changed. Copy a fresh campaign brief.");
+  if (!Array.isArray(input.nodeIds) || input.nodeIds.length < 1 || input.nodeIds.length > 4 || new Set(input.nodeIds).size !== input.nodeIds.length) throw new Error("Choose one to four distinct whole artboards.");
+  const roots = await campaignNodes(input.nodeIds);
+  if (roots.some((node) => node.parent !== figma.currentPage || !["FRAME", "COMPONENT", "INSTANCE"].includes(node.type) || typeof node.clone !== "function")) throw new Error("Campaigns start from whole artboards directly on the current page.");
+  campaignWalk(roots, 5000);
+  if (input.pageId !== figma.currentPage.id) throw new Error("The page changed while reading the source artboards. Start again on the original page.");
+  const brief = {};
+  for (const key of ["objective", "audience", "offer", "callToAction"]) brief[key] = campaignString(input.brief?.[key], key, 2000);
+  brief.formats = Array.isArray(input.brief?.formats) ? input.brief.formats.slice(0, 8).map((item) => typeof item === "string" ? campaignString(item, "Format", 100) : item) : [];
+  const kit = input.brandKitId ? store.kits.find((item) => item.id === input.brandKitId) : null;
+  if (input.brandKitId && !kit) throw new Error("Import the selected brand kit first.");
+  const campaign = { id: campaignId("campaign"), name: campaignString(input.name, "Campaign name", 120), pageId: figma.currentPage.id, brief, brandKitId: kit?.id ?? null, brandKit: kit ? JSON.parse(JSON.stringify(kit)) : null, createdAt: new Date().toISOString(), status: "active", originalNodeIds: roots.map((node) => node.id), concepts: [], checkpoints: [], formats: [] };
+  const created = [];
+  try {
+    figma.commitUndo();
+    for (const direction of campaignDirections) {
+      const copies = campaignCloneRoots(roots, direction.name, created);
+      campaign.concepts.push({ id: campaignId(direction.id), name: direction.name, direction: direction.id, guidance: direction.guidance, nodeIds: copies.map((node) => node.id), rootTypes: copies.map((node) => node.type), status: "draft", revision: null, review: null });
+    }
+    store.campaigns.push(campaign); store.activeId = campaign.id; saveCampaignStore(store); figma.commitUndo();
+  } catch (error) { return campaignRollback(created, error); }
+  return campaignResult(campaign, { nextStep: "These are protected starting copies. Claude must now create three distinct editable directions, then run visual and measured reviews. No generated concept is approved yet." });
+}
+function campaignSolid(node) {
+  if (!Array.isArray(node.fills) || node.fills.length !== 1 || node.opacity !== undefined && node.opacity !== 1) return null;
+  const paint = node.fills[0];
+  return paint.type === "SOLID" && paint.visible !== false && (paint.opacity ?? 1) === 1 ? paint.color : null;
+}
+function campaignLuminance(color) { return [color.r, color.g, color.b].map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0); }
+function campaignHex(color) { return "#" + [color.r, color.g, color.b].map((value) => Math.round(value * 255).toString(16).padStart(2, "0")).join("").toUpperCase(); }
+async function campaignReview(input, store, campaign, variant) {
+  const roots = await campaignNodes(variant.nodeIds);
+  const beforeRevision = await campaignFingerprint(roots);
+  const checks = { complete: true, errors: [], warnings: [], unknown: [] };
+  const add = (kind, node, message) => { if (checks[kind].length < 100) checks[kind].push({ nodeId: node.id, message }); else checks.complete = false; };
+  for (const root of roots) {
+    let cursor, complete = false;
+    for (let batch = 0; batch < 8; batch++) {
+      const audit = await auditTextOverflow(root, { includeHidden: false, maxTextNodes: 200, maxTraversalNodes: 4000, timeBudgetMs: 3000, ...(cursor ? { cursor } : {}) });
+      for (const item of audit.text || []) for (const warning of item.warnings || []) add("errors", { id: item.id }, typeof warning === "string" ? warning : JSON.stringify(warning));
+      if (audit.complete) { cursor = null; complete = true; break; }
+      cursor = audit.nextCursor;
+      if (!cursor) break;
+    }
+    if (!complete) { checks.complete = false; add("unknown", root, "Text checking reached its batch limit. Simplify this artboard before approval."); }
+  }
+  for (const node of campaignWalk(roots)) {
+    if (node.visible === false || !campaignIsWithin(node, new Set(roots.map((root) => root.id)))) continue;
+    if (node.type === "TEXT") {
+      if (node.hasMissingFont) add("errors", node, "A font is missing.");
+      if (typeof node.fontSize === "number" && node.fontSize < 12) add("warnings", node, "Text is below 12 px. Check legibility at the final display size.");
+      if (campaign.brandKit?.fonts.length && node.fontName && node.fontName !== figma.mixed && !campaign.brandKit.fonts.some((font) => font.family === node.fontName.family && font.style === node.fontName.style)) add("warnings", node, `Font ${node.fontName.family} ${node.fontName.style} is outside the approved brand kit.`);
+      const foreground = campaignSolid(node), background = node.parent && campaignSolid(node.parent);
+      // A direct opaque background is only measurable when no sibling can paint under/over the text.
+      const siblings = node.parent?.children || [];
+      const box = node.absoluteBoundingBox;
+      const overlap = !box || siblings.some((sibling) => { if (sibling === node || sibling.visible === false) return false; const b = sibling.absoluteBoundingBox; return !b || b.x < box.x + box.width && b.x + b.width > box.x && b.y < box.y + box.height && b.y + b.height > box.y; });
+      if (foreground && background && !overlap) {
+        const a = campaignLuminance(foreground), b = campaignLuminance(background), ratio = (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+        if (ratio < 4.5) add("warnings", node, `Solid-colour contrast is ${ratio.toFixed(2)}:1, below the conservative 4.5:1 review target.`);
+      } else add("unknown", node, "Contrast needs visual review because the text or background is mixed, transparent, image-based, or overlapping.");
+    }
+    const solid = campaignSolid(node);
+    if (solid && campaign.brandKit?.colors.length && !campaign.brandKit.colors.some((color) => color.hex === campaignHex(solid))) add("warnings", node, `Colour ${campaignHex(solid)} is outside the approved brand kit.`);
+  }
+  const revision = await campaignFingerprint(roots);
+  if (revision !== beforeRevision) throw new Error("The artwork changed during measured checks. Run a fresh campaign review.");
+  variant.revision = revision; variant.review = { revision, checks, visual: null, checkedAt: new Date().toISOString() };
+  saveCampaignStore(store);
+  return campaignResult(campaign, { conceptId: variant.id, revision, checks, nodeIds: variant.nodeIds, nextStep: "Inspect screenshots of every listed node, address measured errors, and record visual findings against this revision before asking for approval." });
+}
+async function campaignFresh(variant) {
+  const revision = await campaignFingerprint(await campaignNodes(variant.nodeIds));
+  if (!variant.review || variant.review.revision !== revision || variant.revision !== revision) throw new Error("The design changed after its review. Run the campaign review and inspect fresh screenshots again.");
+  return revision;
+}
+async function campaignAdapt(input, store, campaign, variant) {
+  if (variant.status !== "approved") throw new Error("Approve a creative direction before adapting its sizes.");
+  await campaignFresh(variant);
+  if (variant.nodeIds.length !== 1) throw new Error("Size adaptation needs a single-artboard concept. Start a campaign with one artboard for this workflow.");
+  if (!Array.isArray(input.formats) || !input.formats.length || input.formats.length > 8 || campaign.formats.length + input.formats.length > 24) throw new Error("Choose one to eight sizes, with at most 24 adaptations per campaign.");
+  const formats = input.formats.map((format) => { if (![format.width, format.height].every((value) => Number.isFinite(value) && value >= 240 && value <= 4096)) throw new Error("Format width and height must be between 240 and 4096 px."); return { name: campaignString(format.name, "Format name", 100), width: format.width, height: format.height }; });
+  const [source] = await campaignNodes(variant.nodeIds);
+  if (source.type !== "FRAME") throw new Error("Adaptation requires an editable frame. Prepare a frame template before starting the campaign.");
+  const roles = { ...(input.roles || {}) };
+  const roleNames = ["headline", "body", "cta", "image", "logo", "disclaimer"];
+  for (const role of Object.keys(roles)) if (!roleNames.includes(role)) throw new Error("Unknown template role.");
+  for (const role of roleNames) if (!roles[role]) {
+    const matches = source.children.filter((node) => new RegExp(`^${role}(?:\\b|[_-])`, "i").test(node.name));
+    if (matches.length === 1) roles[role] = matches[0].id;
+  }
+  if (!roles.headline) throw new Error("Give the headline layer the name Headline, or provide its role mapping. Put mapped layers directly inside the artboard.");
+  const direct = new Set(source.children.map((node) => node.id));
+  if (Object.values(roles).some((id) => !direct.has(id)) || new Set(Object.values(roles)).size !== Object.values(roles).length) throw new Error("Each mapped role must be a different direct child of the concept artboard.");
+  const focal = input.focalPoint || { x: .5, y: .5 };
+  if (![focal.x, focal.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Image focal coordinates must be between 0 and 1.");
+  // Load fonts before cloning; no partial output is created for missing fonts.
+  for (const node of campaignWalk([source])) if (node.type === "TEXT") await loadCurrentTextFonts(node);
+  const created = [], variants = [];
+  try {
+    figma.commitUndo();
+    for (const format of formats) {
+      if (figma.currentPage.id !== campaign.pageId) throw new Error("The page changed during adaptation.");
+      const [copy] = campaignCloneRoots([source], format.name, created);
+      copy.layoutMode = "NONE"; copy.resize(format.width, format.height);
+      const mapped = Object.fromEntries(Object.entries(roles).map(([role, id]) => [role, copy.children[source.children.findIndex((node) => node.id === id)]]));
+      const margin = Math.round(Math.min(format.width, format.height) * .06), gap = Math.max(12, Math.round(margin * .5));
+      const wide = format.width / format.height > 1.4;
+      const contentWidth = wide && mapped.image ? Math.round((format.width - margin * 3) * .5) : format.width - margin * 2;
+      let y = margin;
+      for (const role of ["logo", "headline", "body", "cta", "disclaimer"]) {
+        const node = mapped[role]; if (!node) continue;
+        if ("layoutPositioning" in node) node.layoutPositioning = "AUTO";
+        node.x = margin; node.y = y;
+        if (node.type === "TEXT") {
+          const ideal = role === "headline" ? Math.min(contentWidth * .12, format.height * .12) : role === "disclaimer" ? Math.max(12, Math.min(format.width, format.height) * .018) : Math.max(16, Math.min(format.width, format.height) * .032);
+          if (typeof node.fontSize === "number") node.fontSize = Math.max(role === "headline" ? 24 : 12, Math.round(ideal));
+          node.textAutoResize = "HEIGHT"; node.resize(contentWidth, Math.max(1, node.height));
+        } else if (node.resize) {
+          const width = role === "logo" ? Math.min(contentWidth * .35, node.width) : Math.min(contentWidth, node.width);
+          node.resize(Math.max(1, width), Math.max(1, node.height * width / Math.max(1, node.width)));
+        }
+        y += node.height + gap;
+      }
+      if (mapped.image) {
+        const image = mapped.image;
+        image.x = wide ? margin * 2 + contentWidth : margin;
+        image.y = wide ? margin : y;
+        const imageWidth = wide ? format.width - image.x - margin : contentWidth;
+        const imageHeight = wide ? format.height - margin * 2 : format.height - y - margin;
+        if (imageHeight < 40) throw new Error(`${format.name} has too much copy for its safe area. Shorten the approved copy or choose a larger format.`);
+        image.resize(imageWidth, imageHeight);
+        if (Array.isArray(image.fills)) {
+          const fills = [];
+          for (const paint of image.fills) {
+            if (paint.type !== "IMAGE" || !paint.imageHash) { fills.push(paint); continue; }
+            const asset = figma.getImageByHash(paint.imageHash);
+            if (!asset) throw new Error("The approved image asset is missing.");
+            const size = await asset.getSizeAsync();
+            // Image transform maps the frame's normalised coordinates into image coordinates.
+            const scale = Math.max(imageWidth / size.width, imageHeight / size.height);
+            const cropWidth = imageWidth / (size.width * scale), cropHeight = imageHeight / (size.height * scale);
+            const x = Math.max(0, Math.min(1 - cropWidth, focal.x - cropWidth / 2)), y0 = Math.max(0, Math.min(1 - cropHeight, focal.y - cropHeight / 2));
+            fills.push({ ...paint, scaleMode: "CROP", imageTransform: [[cropWidth, 0, x], [0, cropHeight, y0]] });
+          }
+          image.fills = fills;
+        }
+      }
+      if (y > format.height - margin && !mapped.image) throw new Error(`${format.name} needs shorter copy or a larger size.`);
+      // Keep decorative layers proportionally positioned; they are explicitly flagged for visual review.
+      for (let index = 0; index < copy.children.length; index++) if (!Object.values(mapped).includes(copy.children[index])) {
+        const node = copy.children[index], original = source.children[index];
+        node.x = original.x / source.width * format.width; node.y = original.y / source.height * format.height;
+      }
+      variants.push({ id: campaignId("format"), name: format.name, direction: variant.direction, sourceConceptId: variant.id, nodeIds: [copy.id], rootTypes: [copy.type], status: "draft", revision: null, review: null, dimensions: { width: format.width, height: format.height }, roles: Object.fromEntries(Object.entries(mapped).map(([role, node]) => [role, node.id])), focalPoint: focal });
+    }
+    if (figma.currentPage.id !== campaign.pageId) throw new Error("The page changed during adaptation. Return to the campaign page and try again.");
+    await campaignFresh(variant);
+    campaign.formats.push(...variants); saveCampaignStore(store); figma.commitUndo();
+  } catch (error) { return campaignRollback(created, error); }
+  return campaignResult(campaign, { variants, nextStep: "Each adapted format is an unapproved draft. Review text fit, decorative-layer placement, focal crop, and contrast before approving and exporting it." });
+}
+async function executeCampaign(name, input = {}) {
+  const store = readCampaignStore();
+  if (name === "brandKitList") return { kits: store.kits };
+  if (name === "brandKitGet") { const kit = store.kits.find((item) => item.id === input.id); if (!kit) throw new Error("Brand kit not found."); return { kit }; }
+  if (name === "brandKitSave") {
+    const kit = validateBrandKit(input.kit), index = store.kits.findIndex((item) => item.id === kit.id);
+    if (index < 0 && store.kits.length >= 12) throw new Error("This file already has 12 brand kits.");
+    if (index < 0) store.kits.push(kit); else store.kits[index] = kit;
+    saveCampaignStore(store); return { kit, kits: store.kits };
+  }
+  if (name === "campaignStart") return campaignStart(input, store);
+  if (name === "campaignStatus") {
+    const campaigns = store.campaigns.map(({ id, name, status, pageId }) => ({ id, name, status, pageId }));
+    const active = store.campaigns.find((item) => item.id === store.activeId);
+    if (!input.campaignId && (!active || active.pageId !== figma.currentPage.id)) return { campaign: null, campaigns, activePageId: active?.pageId ?? null };
+    return campaignResult(campaignFind(store, input.campaignId), { campaigns, activePageId: active?.pageId ?? null });
+  }
+  const campaign = campaignFind(store, input.campaignId);
+  if (name === "campaignFinish") {
+    if (input.userConfirmed !== true) throw new Error("Confirm Finish campaign to release the draft editing boundary.");
+    if (store.activeId !== campaign.id) throw new Error("This campaign is not active.");
+    campaign.status = "finished"; store.activeId = null; saveCampaignStore(store); return campaignResult(campaign);
+  }
+  if (name === "campaignResume") {
+    if (input.userConfirmed !== true) throw new Error("Confirm Resume campaign to restore its editing boundary.");
+    if (store.activeId && store.activeId !== campaign.id) throw new Error("Finish the other active campaign first.");
+    await campaignNodes([...campaign.concepts, ...campaign.formats].flatMap((item) => item.nodeIds));
+    store.activeId = campaign.id; campaign.status = "active"; saveCampaignStore(store); return campaignResult(campaign);
+  }
+  if (name === "campaignExportPlan") {
+    const ids = input.conceptIds?.length ? input.conceptIds : [...campaign.concepts, ...campaign.formats].filter((item) => item.status === "approved").map((item) => item.id);
+    if (!ids.length || ids.length > 12 || new Set(ids).size !== ids.length) throw new Error("Choose one to twelve approved designs for export.");
+    const variants = [];
+    for (const id of ids) { const variant = campaignVariant(campaign, id); if (variant.status !== "approved") throw new Error("Only approved concepts and formats can be exported as final campaign artwork."); await campaignFresh(variant); if (variant.approvedRevision !== variant.revision || !variant.review.visual?.reviewed || variant.review.visual.issues.length || !variant.review.checks.complete || variant.review.checks.errors.length) throw new Error("This design needs current visual review and approval before export."); variants.push({ id, revision: variant.revision, nodeIds: variant.nodeIds }); }
+    return { campaignId: campaign.id, nodeIds: variants.flatMap((item) => item.nodeIds), variants };
+  }
+  if (store.activeId !== campaign.id && !["campaignPreview", "campaignShow"].includes(name)) throw new Error("Resume this campaign before changing or reviewing it.");
+  if (name === "campaignRestore") {
+    if (input.userConfirmed !== true) throw new Error("Confirm restoring a checkpoint as a new draft.");
+    const checkpoint = campaign.checkpoints.find((item) => item.id === input.checkpointId);
+    if (!checkpoint) throw new Error("Checkpoint not found.");
+    const roots = await campaignNodes(checkpoint.nodeIds), created = [];
+    try {
+      figma.commitUndo();
+      const copies = campaignCloneRoots(roots, `Restored ${checkpoint.label}`, created); copies.forEach((node) => { node.visible = true; });
+      const restored = { id: campaignId("restored"), name: `Restored ${checkpoint.label}`, direction: checkpoint.direction, nodeIds: copies.map((node) => node.id), rootTypes: copies.map((node) => node.type), status: "draft", revision: null, review: null, restoredFrom: checkpoint.id };
+      if (campaign.concepts.length >= 24) throw new Error("This campaign has reached its restored-concept limit.");
+      campaign.concepts.push(restored); saveCampaignStore(store); figma.commitUndo(); return campaignResult(campaign, { restored });
+    } catch (error) { return campaignRollback(created, error); }
+  }
+  const variant = campaignVariant(campaign, input.conceptId);
+  if (name === "campaignReview") return campaignReview(input, store, campaign, variant);
+  if (name === "campaignReviewEvidence") {
+    if (input.revision !== await campaignFresh(variant)) throw new Error("The review revision changed.");
+    variant.review.renderedEvidence = input.revision; saveCampaignStore(store); return { revision: input.revision, renderedEvidence: true };
+  }
+  if (name === "campaignRecordReview") {
+    if (input.reviewed !== true || input.revision !== await campaignFresh(variant)) throw new Error("Inspect this revision's screenshots before recording a visual review.");
+    if (variant.review.renderedEvidence !== input.revision) throw new Error("Run the screenshot review before recording visual findings.");
+    if (!Array.isArray(input.issues || []) || (input.issues || []).length > 40) throw new Error("Visual review accepts at most 40 issues.");
+    variant.review.visual = { reviewed: true, notes: campaignString(input.notes, "Visual review notes", 4000), issues: (input.issues || []).map((item) => campaignString(item, "Visual issue", 500)) };
+    saveCampaignStore(store); return campaignResult(campaign);
+  }
+  if (name === "campaignApprove") {
+    if (input.userConfirmed !== true) throw new Error("Approval requires your explicit confirmation.");
+    if (input.revision !== await campaignFresh(variant)) throw new Error("The approval revision changed.");
+    const review = variant.review;
+    if (!review.checks.complete || review.checks.errors.length || !review.visual?.reviewed || review.visual.issues.length) throw new Error("Resolve measured errors and visual issues, complete the visual review, then approve this design.");
+    variant.status = "approved"; variant.approvedRevision = input.revision; variant.approvedAt = new Date().toISOString();
+    if (!variant.sourceConceptId) campaign.selectedConceptId = variant.id;
+    saveCampaignStore(store); return campaignResult(campaign);
+  }
+  if (name === "campaignCheckpoint") {
+    if (campaign.checkpoints.length >= 8) throw new Error("This campaign already has eight checkpoints. Existing checkpoints are preserved.");
+    const roots = await campaignNodes(variant.nodeIds), created = [];
+    const label = campaignString(input.label, "Checkpoint label", 100);
+    try {
+      figma.commitUndo();
+      const copies = campaignCloneRoots(roots, `Checkpoint — ${label}`, created); copies.forEach((node) => { node.visible = false; });
+      const checkpoint = { id: campaignId("checkpoint"), label, conceptId: variant.id, direction: variant.direction, nodeIds: copies.map((node) => node.id), createdAt: new Date().toISOString() };
+      campaign.checkpoints.push(checkpoint); saveCampaignStore(store); figma.commitUndo(); return campaignResult(campaign, { checkpoint });
+    } catch (error) { return campaignRollback(created, error); }
+  }
+  if (name === "campaignAdapt") return campaignAdapt(input, store, campaign, variant);
+  if (name === "campaignShow" || name === "campaignPreview") {
+    const roots = await campaignNodes(input.original ? campaign.originalNodeIds : variant.nodeIds);
+    if (name === "campaignShow") { figma.currentPage.selection = roots; figma.viewport.scrollAndZoomIntoView(roots); return campaignResult(campaign, { nodeIds: roots.map((node) => node.id) }); }
+    const before = await campaignFingerprint(roots), images = [];
+    for (const root of roots) images.push(await screenshotNode(root, { maxDimension: 1600, scale: 1 }));
+    if (before !== await campaignFingerprint(roots)) throw new Error("The artwork changed while generating the preview. Try again.");
+    if (!input.original && variant.review?.revision === before) { variant.review.renderedEvidence = before; saveCampaignStore(store); }
+    return campaignResult(campaign, { images, revision: before });
+  }
+  throw new Error("Unsupported campaign command.");
+}
+campaignActions.add("campaignReviewEvidence");

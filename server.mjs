@@ -11,6 +11,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createCredentialStore } from "./credential-store.mjs";
+import { campaignInstructions, registerCampaignTools } from "./campaign-tools.mjs";
+import { getImageProviderStatus, generateCampaignImage } from "./image-provider.mjs";
 
 const host = process.env.FIGMA_BRIDGE_HOST ?? "127.0.0.1";
 if (!["127.0.0.1", "::1"].includes(host)) throw new Error("FIGMA_BRIDGE_HOST must be a loopback IP (127.0.0.1 or ::1).");
@@ -28,7 +30,7 @@ const replacedSessionRetentionMs = 5 * 60_000;
 const proxyHealthIntervalMs = 2_000;
 const operationRetentionMs = 60 * 60_000;
 const operationHardTimeoutMs = 30 * 60_000;
-const bridgeVersion = "0.14.2-local.4";
+const bridgeVersion = "0.14.2-local.5";
 const trackedCompositionCapability = "tracked-composition-v1";
 const compositionImageCapability = "composition-image-audit-v2";
 const exportDirectory = process.env.FIGMA_EXPORT_DIR ?? join(homedir(), "Pictures", "Figma MCP Exports");
@@ -1845,6 +1847,7 @@ async function deleteComment(input) {
 }
 
 const workflowInstructions = [
+  campaignInstructions,
   "Use this server with the inspect-first $figma-local-workflow skill when available.",
   "For best first-pass results, always follow this order:",
   "1. figma_list_connections — choose a runtime targetId, stableTargetRef (file:<key>), or exact namedTargetRef (name:<saved label/documentName>) for each canvas call. Switching is per-call; never guess from focus or page names, fuzzy-match names, or choose among duplicate names.",
@@ -1883,7 +1886,10 @@ const server = new McpServer(
 const registerTool = server.registerTool.bind(server);
 server.registerTool = (name, config, callback) => {
   if (apiDisabled && ["figma_comment_status", "figma_list_comments", "figma_post_comment", "figma_delete_comment"].includes(name)) return undefined;
-  const canvas = /send(?:Tracked)?Command\(/.test(String(callback));
+  const { localCanvas = false, ...publicConfig } = config;
+  config = publicConfig;
+  // Imported handlers may have their helper names rewritten by the bundler.
+  const canvas = localCanvas || /send(?:Tracked)?Command\(/.test(String(callback));
   if (!canvas) return registerTool(name, config, callback);
   const fields = {
     targetId: z.string().trim().min(1).max(220).optional().describe("Per-call target: exact runtime ID, file:<key>, or name:<saved label/documentName> from figma_list_connections. A unique exact saved name also works. Never fuzzy-match or use a page name. Overrides only this call's per-proxy FIGMA_BRIDGE_TARGET default."),
@@ -2765,6 +2771,14 @@ server.registerTool("figma_list_fonts", {
   try { return output(await sendCommand("listFonts", input)); } catch (error) { return failure(error); }
 });
 
+server.registerTool("figma_rename_node", {
+  title: "Name a Figma layer",
+  description: "Rename one verified current-page layer, for example to establish a campaign template's Headline, Body, CTA, Image, Logo or Disclaimer role. Active campaign protection requires the layer to belong to an editable draft; renaming invalidates its previous review.",
+  inputSchema: { nodeId: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(200) },
+}, async (input) => {
+  try { return output(await sendCommand("renameNode", input)); } catch (error) { return failure(error); }
+});
+
 server.registerTool("figma_set_auto_layout", {
   title: "Set Figma auto-layout",
   description: "Apply or remove auto-layout on a selected frame, component, or instance. This is destructive only to the node's layout settings, not its children.",
@@ -2776,6 +2790,32 @@ server.registerTool("figma_set_auto_layout", {
   },
 }, async (input) => {
   try { return output(await sendCommand("setAutoLayout", input)); } catch (error) { return failure(error); }
+});
+
+registerCampaignTools(server, { sendCommand, output, failure, imageOutput, writePngExport });
+
+server.registerTool("figma_image_provider_status", {
+  title: "Check optional image generation",
+  description: "Report whether an administrator configured the optional paid image provider. Never returns credentials. Disabled by default; no network request is made by this check.",
+  inputSchema: {},
+}, async () => {
+  try { return output(getImageProviderStatus({ env: process.env })); } catch (error) { return failure(error); }
+});
+
+server.registerTool("figma_generate_campaign_image", {
+  title: "Generate or edit an approved campaign image",
+  description: "Optional paid provider request, only after the user authorizes this image/prompt. Check provider status first. One image per request. Reuse requestId for recovery; never create a second ID to retry an uncertain request. An optional approved local sourcePath edits that image. Returns a local file and provenance; it does not place artwork or change Figma. Never ask for or include an API key in tool inputs.",
+  inputSchema: {
+    requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/),
+    prompt: z.string().trim().min(1).max(8000), userConfirmed: z.literal(true),
+    sourcePath: z.string().max(4000).optional(),
+    size: z.enum(["1024x1024", "1536x1024", "1024x1536"]).default("1024x1024"),
+    quality: z.enum(["low", "medium", "high"]).default("medium"),
+    transparentBackground: z.boolean().default(false),
+  },
+}, async (input) => {
+  try { return output(await generateCampaignImage(input, { env: process.env, outputDirectory: join(exportDirectory, "Generated Campaign Images") })); }
+  catch (error) { return failure(error); }
 });
 
 async function connectMcp() {

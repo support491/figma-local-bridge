@@ -105,7 +105,7 @@ async function startExtension(context, port) {
   const args = config.args.map((arg) => arg.replaceAll("${__dirname}", extracted));
   const child = launch(context, args, {
     PATH: process.env.PATH,
-    ...config.env,
+    ...Object.fromEntries(Object.entries(config.env).map(([key, value]) => [key, value.replace(/\$\{user_config\.([^}]+)\}/g, (_match, name) => String(manifest.user_config[name].default))])),
     FIGMA_BRIDGE_PORT: String(port),
     FIGMA_PREFERENCES_DIR: join(directory, `preferences-${port}`),
     FIGMA_EXPORT_DIR: join(directory, `exports-${port}`),
@@ -133,13 +133,15 @@ test("staff archives are reproducible, portable, and exclude local settings and 
   assert.deepEqual(await readFile(distribution.extension), await readFile(second.extension));
   assert.deepEqual(await readFile(distribution.plugin), await readFile(second.plugin));
   assert.deepEqual(await readFile(distribution.kit), await readFile(second.kit));
-  assert.deepEqual(Object.keys(extensionFiles).sort(), ["INSTALL.md", "LICENSE", "THIRD_PARTY_NOTICES.txt", "icon.png", "manifest.json", "server/bridge.mjs", "server/launcher.mjs"].sort());
+  assert.deepEqual(Object.keys(extensionFiles).sort(), ["INSTALL.md", "CAMPAIGN-STUDIO.md", "IMAGE-PROVIDER.md", "LICENSE", "THIRD_PARTY_NOTICES.txt", "icon.png", "manifest.json", "server/bridge.mjs", "server/launcher.mjs"].sort());
   assert.equal(manifest.server.type, "node");
   assert.equal(manifest.server.mcp_config.command, "node");
   assert.equal(manifest.server.mcp_config.env.FIGMA_BRIDGE_HOST, "127.0.0.1");
   assert.equal(manifest.server.mcp_config.env.FIGMA_BRIDGE_PORT, "3846");
   assert.ok(!manifest.server.mcp_config.args.includes("--proxy-only"));
-  assert.equal(manifest.user_config, undefined);
+  assert.equal(manifest.user_config.image_enabled.default, false);
+  assert.equal(manifest.user_config.image_api_key.sensitive, true);
+  assert.equal(manifest.user_config.image_api_key.default, "");
   assert.match(decode(extensionFiles.LICENSE), /2026 Arsenio Aaron/);
   assert.match(decode(extensionFiles.LICENSE), /2026 David Buck/);
   assert.match(decode(extensionFiles["THIRD_PARTY_NOTICES.txt"]), /@modelcontextprotocol\/sdk/);
@@ -161,6 +163,8 @@ test("staff archives are reproducible, portable, and exclude local settings and 
   assert.deepEqual(release.platforms, ["darwin"]);
   assert.ok(kitFiles["TEAM-DEPLOYMENT.md"]);
   assert.ok(kitFiles["STAFF-PILOT.md"]);
+  assert.ok(kitFiles["CAMPAIGN-STUDIO.md"]);
+  assert.ok(kitFiles["IMAGE-PROVIDER.md"]);
   assert.match(decode(kitFiles["START-HERE.html"]), /Work on a copy/);
   assert.match(decode(kitFiles["START-HERE.html"]), /Copy instructions for Claude/);
 });
@@ -173,6 +177,10 @@ test("extracted package starts its owner, routes a simulated Figma read, blocks 
   assert.equal(status.bridge.processId, extension.child.pid);
   const tools = await extension.rpc.request("tools/list");
   assert.ok(tools.tools.some((tool) => tool.name === "figma_bridge_status"));
+  assert.ok(tools.tools.some((tool) => tool.name === "figma_campaign_review"));
+  assert.ok(tools.tools.some((tool) => tool.name === "figma_campaign_export"));
+  const imageProvider = toolJson(await extension.call("figma_image_provider_status"));
+  assert.equal(imageProvider.enabled, false);
   assert.ok(!tools.tools.some((tool) => /comment/.test(tool.name)));
   const blocked = await post(base, "/v1/api-credentials/save", { token: "fake", fileKey: "fake" });
   assert.equal(blocked.status, 403);
@@ -191,6 +199,25 @@ test("extracted package starts its owner, routes a simulated Figma read, blocks 
   assert.equal(command.input.nodeId, "1:1");
   await post(base, "/v1/result", { sessionId: "staff-session", id: command.id, ok: true, result: { text: "Summer sale" } });
   assert.equal(toolJson(await read).text, "Summer sale");
+  const reviewTool = tools.tools.find((tool) => tool.name === "figma_campaign_review");
+  assert.ok(reviewTool.inputSchema.properties.targetId, "campaign tools must use the pinned-target wrapper");
+  const campaignReview = extension.call("figma_campaign_review", { targetId: "name:Marketing Campaign", campaignId: "campaign-test", conceptId: "product-test" });
+  const steps = [
+    ["campaignReview", { revision: "render-1", nodeIds: ["1:2"], checks: { complete: true, errors: [], warnings: [], unknown: [] } }],
+    ["screenshot", { imageBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=", mimeType: "image/png" }],
+    ["campaignReviewEvidence", { revision: "render-1", renderedEvidence: true }],
+  ];
+  for (const [name, result] of steps) {
+    const response = await fetch(`${base}/v1/poll?sessionId=staff-session`, { signal: AbortSignal.timeout(5000) });
+    const dispatched = (await response.json()).command;
+    assert.equal(dispatched.name, name);
+    assert.equal(dispatched.targetId, "staff-file");
+    if (name === "campaignReviewEvidence") assert.equal(dispatched.input.revision, "render-1");
+    await post(base, "/v1/result", { sessionId: "staff-session", id: dispatched.id, ok: true, result });
+  }
+  const visualResult = await campaignReview;
+  assert.notEqual(visualResult.isError, true, JSON.stringify(visualResult));
+  assert.equal(visualResult.content.filter((block) => block.type === "image").length, 1);
   const exited = once(extension.child, "exit");
   extension.child.stdin.end();
   await exited;

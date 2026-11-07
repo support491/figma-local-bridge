@@ -1,6 +1,6 @@
 {
   "name": "figma-local-bridge",
-  "version": "0.14.2-local.4",
+  "version": "0.14.2-local.5",
   "private": true,
   "description": "Local-only MCP bridge for controlling the Figma Design file open in Figma Desktop.",
   "homepage": "https://github.com/support491/figma-local-bridge#readme",
@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "esbuild server.mjs --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.mjs",
-    "check": "node --check server.mjs && node --check plugin/code.js && node --test test/server.test.mjs test/api-credentials.test.mjs test/plugin-logic.test.mjs test/credential-store.test.mjs test/plugin-ui.test.mjs test/service.test.mjs test/panel-mode.test.mjs test/desktop-extension.test.mjs test/staff-workflow.test.mjs test/release.test.mjs",
+    "check": "node --check server.mjs && node --check plugin/code.js && node --test test/*.test.mjs",
     "prepare": "npm run build",
     "service": "node scripts/service.mjs",
     "package:desktop": "node scripts/build-mcpb.mjs",

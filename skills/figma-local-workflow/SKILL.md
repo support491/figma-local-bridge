@@ -51,6 +51,10 @@ Comments use Figma's REST API rather than the live plugin connection. Canvas too
 
 ## Layout responsibility and evidence cost
 
+For Campaign Studio requests, load the explicit brand pack and campaign status first. The campaign prepares three working copies; develop them into distinct product, promotional, and editorial directions. Keep edits inside returned draft roots, reuse existing shared styles/tokens, and never finish a campaign to bypass its native scope guard. Do not create or alter global tokens while a campaign is active.
+
+Call `figma_campaign_review` and inspect every returned image before recording subjective feedback with the exact revision. Separate measurable errors from aesthetic judgement and unknown checks. Make at most two refinement passes for a review request, then report remaining issues. Do not approve a concept without the user's explicit choice. Format adaptations each need their own review and approval; only export currently approved artwork. Preserve checkpoints and restore as a new draft. Image generation is optional, separately billed, and requires specific user approval and a stable recovery request ID.
+
 Use the bridge for deterministic mechanics: frame geometry, hierarchy, components, named styles, text bounds, overflow, alignment and mutations. Use this skill for editorial hierarchy, page purpose, content density, print-reading judgement and deciding when an image review is worth its cost.
 
 Use Figma sections to organise a working board, exploration or reference area. Reserve frames for actual design surfaces, reusable layout containers, clipping regions or content that needs its own coordinate system; do not wrap a board in an otherwise empty frame just for organisation.

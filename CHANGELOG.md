@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.2-local.5 — 2026-11-06
+
+- Added Campaign Studio with portable approved brand kits, a guided campaign brief, three editable concept workspaces, and structured handoff to regular Claude Desktop.
+- Added persistent campaign state, protected originals and approved versions, named checkpoints, non-destructive restoration, and explicit finish/resume controls. Active campaigns enforce draft-only mutations in the native command dispatcher.
+- Added inline rendered concept review, bounded measurable checks, revision-bound visual feedback, stale-review rejection, and explicit concept approval. AI design judgement remains separate from measured errors and unknown checks.
+- Added semantic role-based format adaptation, optional focal points, review/approval of output variants, and approved campaign exports with freshness verification and partial-output reporting.
+- Added optional image generation/editing through a separately configured provider, disabled by default. Requests require explicit confirmation, use private recovery records to avoid duplicate paid retries, and return local PNGs with provenance without automatically placing them.
+- Included campaign and image-provider guides in the staff kit. Installation on an existing machine remains a separate step; no running app or service is updated by building this release.
+
 ## 0.14.2-local.4 — 2026-11-05
 
 - Added a staff view with the current file/page, guided marketing tasks, ready-to-copy Claude instructions, connection checks, version mismatch guidance, and support details that omit file content and identifiers.

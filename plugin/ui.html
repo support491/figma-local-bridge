@@ -61,6 +61,33 @@
       .compact .connected #detail { display: none; }
       .compact .connection-controls { margin-top: 10px; }
       .compact button { min-height: 28px; padding: 5px 8px; font-size: 11px; }
+      .compact #campaign-controls { display: none; }
+      #campaign-controls { border: 1px solid #d7e1e8; border-radius: 10px; padding: 14px; background: #fcfdff; }
+      #campaign-controls > summary { font-size: 16px; color: #153a53; }
+      .studio-intro { color: #586875; margin: 8px 0 16px; }
+      .studio-step { border-top: 1px solid #e2e8ee; padding-top: 13px; margin-top: 15px; }
+      .studio-step h2 { font-size: 13px; margin: 0 0 9px; }
+      .studio-step h2 span { display: inline-block; color: #174b83; margin-right: 6px; }
+      .studio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .studio-grid > * { min-width: 0; }
+      .studio-formats { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
+      .studio-formats label { display: flex; align-items: center; gap: 5px; font-weight: 400; margin: 0; }
+      .studio-formats input { width: auto; min-height: 0; margin: 0; }
+      #campaign-controls details { margin-top: 12px; padding-top: 10px; }
+      #campaign-message { padding: 10px; margin-top: 12px; border-radius: 6px; background: #edf4fa; color: #174b83; overflow-wrap: anywhere; }
+      #campaign-message.error { background: #fff0ec; color: #92351f; }
+      #campaign-message:empty { display: none; }
+      #campaign-concepts { display: grid; gap: 8px; margin-top: 10px; }
+      .concept-card { text-align: left; display: grid; gap: 3px; border-color: #d3dfe8; padding: 10px 12px; }
+      .concept-card[aria-pressed="true"] { border: 2px solid #1768ac; background: #edf5fc; padding: 9px 11px; }
+      .concept-card strong { font-size: 12px; }
+      .concept-card span { font-size: 11px; color: #536575; }
+      .studio-preview { margin: 0; min-width: 0; }
+      .studio-preview figcaption { font-size: 11px; font-weight: 600; margin-bottom: 5px; }
+      .studio-preview img { width: 100%; max-height: 200px; object-fit: contain; background: #eaf0f4; border: 1px solid #dce4ea; border-radius: 5px; }
+      #campaign-checks { color: #536575; white-space: pre-line; overflow-wrap: anywhere; margin-top: 10px; }
+      #campaign-prompt, #brand-json { font: 11px/1.5 ui-monospace, monospace; min-height: 120px; }
+      .studio-approval { font-size: 11px; color: #66717b; }
       @media (prefers-reduced-motion: reduce) { .reading .dot, .editing .dot { animation: none; } }
     </style>
   </head>
@@ -82,6 +109,7 @@
         <p id="staff-selection" class="hint">Select the design you want to work on.</p>
         <p id="staff-next">Open Claude Desktop and enable Figma Local Bridge. Keep this panel open.</p>
       </div>
+      <details id="quick-tasks"><summary>Quick edits and connection help</summary>
       <label for="staff-task">What would you like to do?</label>
       <select id="staff-task">
         <option value="check">Check this file without changing it</option>
@@ -101,7 +129,77 @@
       <div id="staff-check" role="status" aria-live="polite">Checking the local connection…</div>
       <div class="buttons"><button id="staff-check-connection">Check connection</button><button id="staff-copy-support">Copy support details</button></div>
       <p class="hint">Support details contain connection state and version numbers only.</p>
+      </details>
     </section>
+    <details id="campaign-controls" open>
+      <summary>Campaign Studio</summary>
+      <p class="studio-intro">One brief. Three creative directions. A campaign ready for your channels.</p>
+      <p class="hint">Claude creates the designs in a regular chat. This panel prepares your workspace and helps you review the results.</p>
+      <div class="studio-step">
+        <h2><span>1</span> Choose your brand</h2>
+        <label for="campaign-brand">Brand kit</label>
+        <select id="campaign-brand"><option value="">Use the selected design as a reference</option></select>
+        <div class="buttons"><button id="brand-refresh">Load saved kits</button><button id="brand-export" disabled>Export kit</button></div>
+        <details id="brand-editor"><summary>Create or import a brand kit</summary>
+          <div class="studio-grid"><div><label for="brand-name">Brand name</label><input id="brand-name" maxlength="100" placeholder="For example: EllaDx"></div><div><label for="brand-version">Kit version</label><input id="brand-version" maxlength="40" value="1.0" placeholder="1.0"></div></div>
+          <div class="studio-grid"><div><label for="brand-colors">Approved colours</label><textarea id="brand-colors" rows="2" placeholder="Navy: #183C54&#10;White: #FFFFFF"></textarea></div><div><label for="brand-fonts">Approved fonts</label><textarea id="brand-fonts" rows="2" placeholder="Inter: Regular&#10;Inter: Bold"></textarea></div></div>
+          <label for="brand-voice">Writing style</label><input id="brand-voice" maxlength="1000" placeholder="Warm, clear, and reassuring">
+          <label for="brand-rules">Design rules (one per line)</label><textarea id="brand-rules" rows="2" placeholder="Keep the approved logo unchanged.&#10;Use a clear, readable headline."></textarea>
+          <div class="buttons"><button id="brand-save">Save brand kit</button></div>
+          <label for="brand-file">Import a shared brand kit</label><input id="brand-file" type="file" accept="application/json,.json">
+          <details><summary>Brand kit JSON and export</summary><label for="brand-json">Paste an existing kit, or copy your exported kit</label><textarea id="brand-json" spellcheck="false"></textarea><div class="buttons"><button id="brand-import">Import JSON</button><button id="brand-copy">Copy JSON</button></div></details>
+          <p class="hint">Kits are saved in this Figma file. Export one to share with a colleague. Colours use a six-digit code such as #183C54.</p>
+        </details>
+      </div>
+      <div class="studio-step">
+        <h2><span>2</span> Tell Claude what you need</h2>
+        <label for="campaign-name">Campaign name</label><input id="campaign-name" maxlength="120" placeholder="Summer promotion">
+        <label for="campaign-objective">What are we promoting?</label><textarea id="campaign-objective" rows="2" maxlength="2000" placeholder="Introduce our new service and encourage bookings."></textarea>
+        <label for="campaign-audience">Who is it for?</label><input id="campaign-audience" maxlength="1000" placeholder="New customers looking for convenient care">
+        <label for="campaign-offer">Offer or key message</label><input id="campaign-offer" maxlength="2000" placeholder="Use your approved offer or campaign message">
+        <label for="campaign-cta">What should people do?</label><input id="campaign-cta" maxlength="500" placeholder="Book an appointment">
+        <label>Where will it appear?</label>
+        <div class="studio-formats"><label><input id="format-square" type="checkbox" checked>Square post</label><label><input id="format-story" type="checkbox" checked>Story</label><label><input id="format-banner" type="checkbox">Banner</label></div>
+        <p class="hint">Select one editable frame directly on the Figma page for automatic size adaptation. You can select up to four artboards for concepts and review only. Your originals are kept.</p>
+        <div class="buttons"><button id="campaign-prepare" class="primary">Prepare 3 concepts</button><button id="campaign-copy" disabled>Copy brief to Claude</button></div>
+        <p class="hint">Prepare creates three editable workspaces. Paste the copied brief into Claude to develop the different designs.</p>
+      </div>
+      <div class="studio-step">
+        <h2><span>3</span> Review and choose</h2>
+        <div class="buttons"><button id="campaign-refresh">Refresh campaign</button></div>
+        <label for="campaign-saved">Saved campaigns on this page</label><select id="campaign-saved"><option value="">No saved campaign loaded</option></select><div class="buttons"><button id="campaign-open" disabled>Open saved campaign</button></div>
+        <p id="campaign-summary" class="hint">Your concepts will appear here.</p>
+        <div id="campaign-concepts" role="group" aria-label="Choose a campaign concept"></div>
+        <div class="buttons"><button id="campaign-show" disabled>Show in Figma</button><button id="campaign-preview" disabled>Compare previews</button><button id="campaign-review" disabled>Copy review request</button></div>
+        <div id="campaign-previews" class="studio-grid" hidden><figure class="studio-preview"><figcaption>Original</figcaption><img id="campaign-original-image" alt="Original design preview"></figure><figure class="studio-preview"><figcaption>Selected concept</figcaption><img id="campaign-draft-image" alt="Selected campaign concept preview"></figure></div>
+        <p id="campaign-checks">Claude will check the rendered design and report any remaining issues.</p>
+        <div class="buttons"><button id="campaign-approve" class="primary" disabled>Approve selected concept</button></div>
+        <p class="studio-approval">Approval keeps this version. Further changes need a restored working copy. Review checks must match the current design.</p>
+      </div>
+      <div class="studio-step">
+        <h2><span>4</span> Prepare your campaign files</h2>
+        <p class="hint">Adapt the approved concept to the formats selected above. Review each new size before exporting.</p>
+        <div class="buttons"><button id="campaign-adapt" disabled>Create selected sizes</button><button id="campaign-size-copy" disabled>Copy size request to Claude</button><button id="campaign-export" disabled>Copy export request</button></div>
+        <details><summary>Image placement and new imagery</summary>
+          <p class="hint">Set the main subject’s position before adapting an image: 50 means the centre.</p>
+          <div class="studio-grid"><div><label for="campaign-focal-x">Subject position across (%)</label><input id="campaign-focal-x" type="number" min="0" max="100" value="50"></div><div><label for="campaign-focal-y">Subject position down (%)</label><input id="campaign-focal-y" type="number" min="0" max="100" value="50"></div></div>
+          <label for="campaign-image-brief">Optional image request</label><textarea id="campaign-image-brief" rows="2" maxlength="2000" placeholder="Describe an illustration or background for this campaign."></textarea>
+          <button id="campaign-image-copy" disabled>Copy image request to Claude</button>
+          <p class="hint">Image generation needs a separately configured provider and may cost money. Claude must check availability and ask before sending this request. No provider key goes in this panel.</p>
+        </details>
+      </div>
+      <details id="campaign-history"><summary>Saved versions and editing controls</summary>
+        <label for="campaign-checkpoint-label">Version name</label><input id="campaign-checkpoint-label" maxlength="100" placeholder="Before changing the headline">
+        <div class="buttons"><button id="campaign-checkpoint" disabled>Save this version</button></div>
+        <label for="campaign-checkpoints">Saved versions</label><select id="campaign-checkpoints"></select>
+        <div class="buttons"><button id="campaign-restore" disabled>Restore as a new draft</button></div>
+        <p class="hint">Restoring keeps the earlier version and creates an editable draft. While a campaign is active, bridge edits are limited to its draft designs.</p>
+        <div class="buttons"><button id="campaign-finish" disabled>Finish campaign</button><button id="campaign-resume" disabled>Resume campaign</button></div>
+        <p class="hint">Finish releases the campaign editing restriction. Saved campaign history stays in this file.</p>
+      </details>
+      <div id="campaign-message" role="status" aria-live="polite"></div>
+      <textarea id="campaign-prompt" aria-label="Campaign instructions to copy manually" readonly hidden></textarea>
+    </details>
     <details id="expanded-controls">
       <summary>Advanced settings</summary>
     <details id="files-details">
@@ -184,7 +282,7 @@
       const advancedSettings = document.getElementById("expanded-controls");
       const localBridgeUrl = "http://localhost:3846";
       const httpControllers = new Map();
-      const supportedMessageTypes = new Set(["bridge-http-request", "bridge-http-cancel", "bridge-metadata", "bridge-metadata-error", "bridge-session", "bridge-status", "bridge-activity", "bridge-view", "staff-context", "staff-copy-result", "staff-error"]);
+      const supportedMessageTypes = new Set(["bridge-http-request", "bridge-http-cancel", "bridge-metadata", "bridge-metadata-error", "bridge-session", "bridge-status", "bridge-activity", "bridge-view", "staff-context", "staff-copy-result", "staff-error", "campaign-result"]);
       let bridgeSession = null;
       let externallyManaged = false;
       let connectedMessage = "Connected to local MCP bridge.";
@@ -206,6 +304,263 @@
       let staffScopeRevision = 0;
       let clipboardRequestId = 0;
       let panelViewTouched = false;
+      const campaignControls = document.getElementById("campaign-controls");
+      const campaignMessage = document.getElementById("campaign-message");
+      const campaignPrompt = document.getElementById("campaign-prompt");
+      const campaignBrand = document.getElementById("campaign-brand");
+      let campaign = null;
+      let savedCampaigns = [];
+      let campaignNeedsRefresh = false;
+      let campaignActiveElsewhere = false;
+      let brandKits = [];
+      let selectedConceptId = "";
+      let campaignPending = null;
+      let campaignRequestSequence = 0;
+      let campaignClipboardSequence = 0;
+      let campaignScopeGeneration = 0;
+      let campaignLoadedFor = "";
+      let pendingPreview = null;
+      let editingBrandId = null;
+
+      function campaignScope() { return [staffContext?.targetId || "", staffContext?.pageId || "", bridgeSession?.sessionId || ""].join("|"); }
+      function campaignVariants() { return [...(campaign?.concepts || []), ...(campaign?.formats || [])]; }
+      function currentConcept() { return campaignVariants().find((item) => item.id === selectedConceptId) || null; }
+      function activeCampaign() { return campaign && campaign.status !== "finished" && campaign.status !== "archived" && campaign.active !== false; }
+      function campaignNotice(message, error = false) { campaignMessage.textContent = message; campaignMessage.className = error ? "error" : ""; }
+      function clearCampaignClipboard() { ++campaignClipboardSequence; campaignPrompt.value = ""; campaignPrompt.hidden = true; }
+      function resetCampaignContext() {
+        ++campaignScopeGeneration;
+        campaign = null; campaignNeedsRefresh = false; campaignActiveElsewhere = false; selectedConceptId = ""; campaignPending = null; pendingPreview = null; campaignLoadedFor = "";
+        brandKits = []; savedCampaigns = []; editingBrandId = null;
+        clearCampaignClipboard(); renderBrandKits(); renderCampaignIndex(); renderCampaign();
+      }
+      function campaignFormats() {
+        return [
+          ["format-square", { name: "Square post", width: 1080, height: 1080 }],
+          ["format-story", { name: "Story", width: 1080, height: 1920 }],
+          ["format-banner", { name: "Banner", width: 1200, height: 628 }],
+        ].filter(([id]) => document.getElementById(id).checked).map(([, format]) => format);
+      }
+      function campaignBrief() {
+        const value = (id) => document.getElementById(id).value.trim();
+        return { objective: value("campaign-objective"), audience: value("campaign-audience"), offer: value("campaign-offer"), callToAction: value("campaign-cta"), formats: campaignFormats() };
+      }
+      function updateCampaign() {
+        const ready = staffReady();
+        const busy = Boolean(campaignPending || working || staffCopyPending || checkedTargetBusy);
+        const concept = currentConcept();
+        const usable = ready && !busy;
+        const hasCampaign = Boolean(campaign && campaign.pageId === staffContext?.pageId);
+        const hasConcept = hasCampaign && Boolean(concept);
+        const active = hasCampaign && activeCampaign();
+        const approved = concept?.status === "approved";
+        const review = concept?.review;
+        const canApprove = !campaignNeedsRefresh && review?.checks?.complete === true && !review.checks.errors?.length && review?.visual?.reviewed === true && !review.visual.issues?.length && review.revision === concept?.revision;
+        for (const id of ["brand-refresh", "brand-save", "brand-import", "brand-file", "campaign-refresh"]) document.getElementById(id).disabled = !usable;
+        document.getElementById("brand-export").disabled = !usable || !campaignBrand.value;
+        document.getElementById("brand-copy").disabled = !document.getElementById("brand-json").value;
+        document.getElementById("campaign-prepare").disabled = !usable || Boolean(active) || campaignActiveElsewhere || selectedStaffNodes().length < 1 || selectedStaffNodes().length > 4 || !document.getElementById("campaign-name").value.trim() || !campaignBrief().objective || !campaignBrief().audience || !campaignBrief().offer || !campaignBrief().callToAction || !campaignFormats().length;
+        for (const id of ["campaign-copy", "campaign-finish"]) document.getElementById(id).disabled = !usable || !active;
+        for (const id of ["campaign-show", "campaign-preview", "campaign-export"]) document.getElementById(id).disabled = !usable || !hasConcept;
+        document.getElementById("campaign-review").disabled = !usable || !active || !hasConcept;
+        document.getElementById("campaign-open").disabled = !usable || !document.getElementById("campaign-saved").value;
+        document.getElementById("campaign-image-copy").disabled = !usable || !active || !hasConcept || approved || !document.getElementById("campaign-image-brief").value.trim();
+        document.getElementById("campaign-approve").disabled = !usable || !active || !hasConcept || approved || !canApprove;
+        document.getElementById("campaign-checkpoint").disabled = !usable || !active || !hasConcept || !document.getElementById("campaign-checkpoint-label").value.trim();
+        document.getElementById("campaign-restore").disabled = !usable || !active || !document.getElementById("campaign-checkpoints").value;
+        const approvalCurrent = approved && !campaignNeedsRefresh && concept?.approvedRevision === concept?.revision && canApprove;
+        document.getElementById("campaign-adapt").disabled = !usable || !active || !approvalCurrent || concept?.nodeIds?.length !== 1 || concept?.rootTypes?.[0] !== "FRAME" || !campaignFormats().length;
+        document.getElementById("campaign-size-copy").disabled = !usable || !active || !hasConcept || !campaignFormats().length;
+        document.getElementById("campaign-resume").disabled = !usable || !hasCampaign || Boolean(active);
+        for (const child of Array.from(document.getElementById("campaign-concepts").children)) child.disabled = !usable;
+        if (!ready) clearCampaignClipboard();
+      }
+      function renderBrandKits() {
+        const before = campaignBrand.value;
+        campaignBrand.replaceChildren();
+        const option = document.createElement("option"); option.value = ""; option.textContent = "Use the selected design as a reference"; campaignBrand.appendChild(option);
+        for (const kit of brandKits) { const item = document.createElement("option"); item.value = kit.id; item.textContent = `${kit.name} · ${kit.version}`; campaignBrand.appendChild(item); }
+        campaignBrand.value = brandKits.some((kit) => kit.id === before) ? before : "";
+      }
+      function populateBrandEditor(kit) {
+        editingBrandId = kit.id;
+        document.getElementById("brand-name").value = kit.name || "";
+        document.getElementById("brand-version").value = kit.version || "1.0";
+        document.getElementById("brand-colors").value = (kit.colors || []).map((item) => `${item.name}: ${item.hex}`).join("\n");
+        document.getElementById("brand-fonts").value = (kit.fonts || []).map((item) => `${item.family}: ${item.style}`).join("\n");
+        document.getElementById("brand-voice").value = kit.voice || "";
+        document.getElementById("brand-rules").value = (kit.rules || []).join("\n");
+        document.getElementById("brand-json").value = JSON.stringify(kit, null, 2);
+      }
+      function renderCampaignIndex() {
+        const select = document.getElementById("campaign-saved"); const prior = select.value;
+        select.replaceChildren();
+        const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose a saved campaign"; select.appendChild(placeholder);
+        for (const item of savedCampaigns.filter((entry) => entry.pageId === staffContext?.pageId)) {
+          const option = document.createElement("option"); option.value = item.id; option.textContent = `${item.name} · ${item.status || "saved"}`; select.appendChild(option);
+        }
+        select.value = savedCampaigns.some((item) => item.id === prior && item.pageId === staffContext?.pageId) ? prior : campaign?.id || "";
+      }
+      function renderCampaign() {
+        const cards = document.getElementById("campaign-concepts"); cards.replaceChildren();
+        const concepts = campaignVariants();
+        if (!concepts.some((item) => item.id === selectedConceptId)) selectedConceptId = concepts[0]?.id || "";
+        for (const concept of concepts) {
+          const card = document.createElement("button"); card.className = "concept-card"; card.setAttribute("aria-pressed", String(concept.id === selectedConceptId));
+          const name = document.createElement("strong"); name.textContent = concept.name || concept.direction || "Concept";
+          const detail = document.createElement("span"); detail.textContent = `${concept.dimensions ? `${concept.dimensions.width} × ${concept.dimensions.height}` : concept.direction || "Campaign format"} · ${concept.status || "draft"}`;
+          card.appendChild(name); card.appendChild(detail);
+          card.onclick = () => { if (card.disabled) return; selectedConceptId = concept.id; pendingPreview = null; clearCampaignClipboard(); renderCampaign(); updateCampaign(); };
+          cards.appendChild(card);
+        }
+        document.getElementById("campaign-summary").textContent = campaign ? `${campaign.name || "Campaign"} · ${activeCampaign() ? "Draft editing protected" : "Finished — editing restriction released"}` : "Your concepts will appear here. Refresh to reopen a saved campaign.";
+        const history = document.getElementById("campaign-checkpoints"); const old = history.value; history.replaceChildren();
+        for (const checkpoint of campaign?.checkpoints || []) { const option = document.createElement("option"); option.value = checkpoint.id; option.textContent = checkpoint.label || checkpoint.name || checkpoint.id; history.appendChild(option); }
+        history.value = (campaign?.checkpoints || []).some((item) => item.id === old) ? old : campaign?.checkpoints?.[0]?.id || "";
+        const concept = currentConcept(); const review = concept?.review; const checks = review?.checks;
+        const lines = [];
+        if (checks) {
+          lines.push(checks.complete ? "Measured checks completed." : "Measured checks are incomplete. Ask Claude to finish checking.");
+          const describe = (item) => typeof item === "string" ? item : item.message || item.reason || item.type || JSON.stringify(item);
+          for (const [key, label] of [["errors", "Fix"], ["warnings", "Review"], ["unknown", "Not verified"]]) for (const item of (checks[key] || []).slice(0, 6)) lines.push(`${label}: ${describe(item)}`);
+          if (review.visual?.reviewed) { lines.push(`Visual review: ${review.visual.notes || "Completed"}`); for (const issue of (review.visual.issues || []).slice(0, 6)) lines.push(`Visual issue: ${describe(issue)}`); }
+          else lines.push("Claude still needs to inspect the actual rendered design.");
+          if (review.revision !== concept.revision) lines.push("The design changed. Run a fresh review before approval.");
+        } else lines.push("Copy the review request into Claude, then refresh this panel to see the results.");
+        document.getElementById("campaign-checks").textContent = lines.join("\n");
+        document.getElementById("campaign-previews").hidden = true;
+      }
+      function requestCampaign(action, input = {}, notice = "Working…", extra = {}) {
+        if (!staffReady() || campaignPending || working || staffCopyPending || checkedTargetBusy) { campaignNotice("Wait until the file is connected and the current operation has finished.", true); return false; }
+        clearCampaignClipboard();
+        const requestId = `studio-${++campaignRequestSequence}`;
+        campaignPending = { requestId, action, scope: campaignScope(), generation: campaignScopeGeneration, extra };
+        campaignNotice(notice);
+        send({ type: "campaign-action", requestId, action, input: { ...input, pageId: staffContext.pageId } });
+        updateCampaign();
+        return true;
+      }
+      function campaignResult(message) {
+        const pending = campaignPending;
+        if (!pending || pending.requestId !== message.requestId || pending.action !== message.action) return;
+        campaignPending = null;
+        if (pending.scope !== campaignScope() || pending.generation !== campaignScopeGeneration) { updateCampaign(); return; }
+        if (!message.ok) { pendingPreview = null; campaignNotice(typeof message.error === "string" ? message.error : message.error?.message || "The action could not finish. Refresh the campaign before trying again.", true); updateCampaign(); return; }
+        const data = message.data || {};
+        if (Array.isArray(data.campaigns)) savedCampaigns = data.campaigns;
+        if (Object.prototype.hasOwnProperty.call(data, "campaign")) {
+          campaign = data.campaign; campaignNeedsRefresh = false; campaignActiveElsewhere = Boolean(data.activePageId && data.activePageId !== staffContext?.pageId);
+          if (campaign) { const summary = { id: campaign.id, name: campaign.name, pageId: campaign.pageId, status: campaign.status }; savedCampaigns = [...savedCampaigns.filter((item) => item.id !== campaign.id), summary]; }
+          renderCampaign();
+        }
+        renderCampaignIndex();
+        updateStaff();
+        if (pending.action === "brandKitList") {
+          brandKits = Array.isArray(data.kits) ? data.kits : []; renderBrandKits();
+          campaignNotice(brandKits.length ? "Brand kits loaded." : "No saved kit yet. Create one, import a shared kit, or use your selected design.");
+          updateCampaign();
+          if (campaignLoadedFor !== campaignScope()) { campaignLoadedFor = campaignScope(); requestCampaign("campaignStatus", {}, "Looking for a saved campaign…"); }
+          return;
+        }
+        if (data.kit) {
+          brandKits = [...brandKits.filter((kit) => kit.id !== data.kit.id), data.kit]; renderBrandKits(); campaignBrand.value = data.kit.id; populateBrandEditor(data.kit);
+          if (pending.extra.export) { document.getElementById("brand-editor").open = true; campaignNotice("Kit exported below. Copy the JSON into a .json file to share, or use your browser download if available."); downloadBrandKit(data.kit); }
+          else campaignNotice("Brand kit saved and selected.");
+        } else if (pending.action === "campaignPreview") {
+          const first = data.images?.[0];
+          if (!first || typeof first.imageBase64 !== "string" || !/^[A-Za-z0-9+/=]+$/.test(first.imageBase64)) { campaignNotice("No preview is available. Use Show in Figma to inspect the design.", true); pendingPreview = null; updateCampaign(); return; }
+          const id = pending.extra.original ? "campaign-original-image" : "campaign-draft-image";
+          document.getElementById(id).src = `data:image/png;base64,${first.imageBase64}`;
+          if (pending.extra.original) {
+            requestCampaign("campaignPreview", { campaignId: campaign.id, conceptId: selectedConceptId }, "Rendering the selected concept…", { original: false }); return;
+          }
+          document.getElementById("campaign-previews").hidden = false;
+          campaignNotice("Previews show the first artboard of each version. Open Figma to inspect every artboard."); pendingPreview = null;
+        } else if (pending.action === "campaignStart") campaignNotice("Three workspaces are ready. Copy the brief into Claude to create the different designs.");
+        else if (pending.action === "campaignApprove") campaignNotice("Selected concept approved. You can now create your campaign sizes.");
+        else if (pending.action === "campaignAdapt") campaignNotice("New sizes created. Ask Claude to review each size before approval and export.");
+        else if (pending.action === "campaignRestore") campaignNotice("Saved version restored as a new draft. Review it before approval.");
+        else if (pending.action === "campaignCheckpoint") campaignNotice("Version saved with this Figma file.");
+        else if (pending.action === "campaignFinish") campaignNotice("Campaign finished. Bridge edits are no longer restricted to campaign drafts. Your history is kept.");
+        else if (pending.action === "campaignResume") campaignNotice("Campaign resumed. Bridge edits are restricted to campaign drafts again.");
+        else if (pending.action === "campaignShow") campaignNotice("The selected concept is visible in Figma.");
+        else if (pending.action === "campaignStatus") campaignNotice(campaign ? "Campaign refreshed. Select a concept to review it." : campaignActiveElsewhere ? "Another campaign is active on a different page. Return to that page and finish it before starting a new campaign." : "Select your starting artboards and complete the brief to begin.");
+        updateCampaign();
+      }
+      async function copyCampaignText(text, success) {
+        const scope = campaignScope(); const generation = campaignScopeGeneration; const sequence = ++campaignClipboardSequence;
+        campaignPrompt.value = ""; campaignPrompt.hidden = true;
+        try { await navigator.clipboard.writeText(text); if (scope === campaignScope() && generation === campaignScopeGeneration && sequence === campaignClipboardSequence) campaignNotice(success); }
+        catch { if (scope !== campaignScope() || generation !== campaignScopeGeneration || sequence !== campaignClipboardSequence) return; campaignPrompt.value = text; campaignPrompt.hidden = false; campaignPrompt.select(); campaignNotice("Copy the selected instructions below and paste them into Claude."); }
+      }
+      function campaignInstructions(kind = "create") {
+        const concept = currentConcept();
+        const common = [
+          "Use Figma Local Bridge only. First call figma_bridge_status and figma_list_connections.",
+          `Verify targetId ${JSON.stringify(staffContext.targetId)}, file ${JSON.stringify(staffContext.documentName || "Current Figma file")}, page ${JSON.stringify(staffContext.pageName)} (pageId ${JSON.stringify(staffContext.pageId)}). Pass this targetId explicitly to every canvas tool. If the connection/page changed, stop and ask me to copy fresh instructions.`,
+          `Call figma_campaign_status for campaignId ${JSON.stringify(campaign.id)}. Work only inside that campaign's editable draft roots. Do not edit source artboards, approved concepts, or saved versions.`,
+          campaign.brandKitId ? `Use the immutable brandKit snapshot returned by figma_campaign_status as this campaign's authority, including its approved components, templates, fonts, colours, voice, rules, and references. The current kit from figma_brand_kit_get may have changed; do not replace the campaign snapshot with it. Verify snapshot asset IDs in this file; imported IDs may belong to another file.` : "Use the original selected design as the style reference. Discover and reuse existing linked components, fonts, styles and tokens.",
+          `Campaign brief: ${JSON.stringify(campaign.brief)}.`,
+        ];
+        const review = "For every completed draft call figma_campaign_review and inspect ALL returned rendered images. Separate measured errors (overflow, colour/font rules, contrast when measurable) from subjective design advice. Fix problems in at most two refinement passes, then review again and record your visual assessment with figma_campaign_record_review using the returned revision. Report unresolved issues honestly. Never approve a concept on my behalf; I will choose and approve in the plugin.";
+        if (kind === "create") common.push("Create three meaningfully different, editable creative directions in the prepared concepts: product-focused, bold promotional, and editorial. Change composition, typography hierarchy, and image treatment to suit the brief; do not simply recolour the same layout. Keep approved logos intact and all labels/text editable. Use existing brand templates and their semantic roles where supplied. For automatic size adaptation, each concept must use one editable FRAME root. BEFORE review and approval, prepare the relevant semantic parts as distinct direct children named Headline, Body, CTA, Image, Logo, and Disclaimer (omit unused roles). Use figma_rename_node only inside draft roots and verified node IDs. For nested structures, reparent only when safe and preserve the rendered design. If this would break a component or the concept has multiple artboards, explain that automatic sizes need a suitable single-frame template; do not alter originals or release campaign protection.", review);
+        if (kind === "review") common.push(`Review conceptId ${JSON.stringify(concept.id)} (${concept.name || concept.direction || "Selected concept"}).`, review);
+        if (kind === "export") common.push("Review campaign status, then call figma_campaign_export for approved campaign concepts/formats and give me the resulting local files. If any requested size is not approved, tell me which one needs review; do not silently approve it or export it as final.");
+        if (kind === "sizes") common.push(`Adapt the selected conceptId ${JSON.stringify(concept.id)} (${concept.name || concept.direction || "Selected concept"}) to these exact formats: ${JSON.stringify(campaignFormats())}.`, "Read the current concept before adapting. Automatic sizes require one editable FRAME with distinct semantic role nodes directly inside it. Verify the exact current IDs for headline, body, cta, image, logo and disclaimer; pass only roles actually present to figma_campaign_adapt. Never guess IDs from another concept, original, or imported kit. If the approved design needs renamed/reparented role layers, first ask me to save a checkpoint and restore it as a new draft; fix that draft, review it, and obtain my approval before adaptation. Never modify an approved original or finish the campaign to bypass protection. If multiple artboards or a protected instance prevent adaptation, explain the template change required. Each new size is a draft: inspect and review all rendered sizes, then wait for my approval before export.");
+        if (kind === "image") common.push(`For conceptId ${JSON.stringify(concept.id)}, my image request is: ${document.getElementById("campaign-image-brief").value.trim()}`, "First call figma_image_provider_status. If disabled, explain that an administrator must configure the optional provider, and offer to use an approved existing image instead. Do not request or store any provider key in Figma or chat. Before a paid generation/edit request, tell me what will be sent and ask for my approval. After approval, use figma_generate_campaign_image with a unique requestId and userConfirmed:true; reuse that ID for recovery to avoid duplicate charges. Use sourcePath only for an image I explicitly approved. Place the returned image with figma_place_local_image inside the draft, preserving approved logos and editable text. Then review the result.");
+        common.push("Keep Figma REST API and comments disabled. Tell me what changed and what to review next in the Campaign Studio panel. This request does not authorize publishing or sending campaign files.");
+        return common.join("\n\n");
+      }
+      function downloadBrandKit(kit) {
+        try {
+          const blob = new Blob([JSON.stringify(kit, null, 2) + "\n"], { type: "application/json" });
+          const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${String(kit.id).replace(/[^a-z0-9_-]/gi, "-")}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch { /* The visible JSON remains available when the host blocks downloads. */ }
+      }
+      function setupCampaignControls() {
+        const bind = (id, action) => { document.getElementById(id).onclick = () => { updateCampaign(); if (!document.getElementById(id).disabled) return action(); }; };
+        for (const id of ["campaign-name", "campaign-objective", "campaign-audience", "campaign-offer", "campaign-cta", "campaign-checkpoint-label", "campaign-image-brief", "brand-json"]) document.getElementById(id).oninput = () => { clearCampaignClipboard(); updateCampaign(); };
+        for (const id of ["format-square", "format-story", "format-banner", "campaign-checkpoints", "campaign-saved"]) document.getElementById(id).onchange = () => { clearCampaignClipboard(); updateCampaign(); };
+        campaignBrand.onchange = () => { clearCampaignClipboard(); editingBrandId = campaignBrand.value || null; const kit = brandKits.find((item) => item.id === campaignBrand.value); if (kit) populateBrandEditor(kit); updateCampaign(); };
+        bind("brand-refresh", () => requestCampaign("brandKitList", {}, "Loading brand kits…"));
+        bind("brand-export", () => requestCampaign("brandKitGet", { id: campaignBrand.value }, "Preparing brand kit export…", { export: true }));
+        bind("brand-save", () => {
+          try {
+            const name = document.getElementById("brand-name").value.trim(); if (!name) throw new Error("Enter a brand name.");
+            const previous = brandKits.find((item) => item.id === editingBrandId);
+            const lines = (id) => document.getElementById(id).value.split("\n").map((value) => value.trim()).filter(Boolean);
+            const colors = lines("brand-colors").map((line) => { const match = /^(.*?):\s*(#[a-f0-9]{6})$/i.exec(line); if (!match || !match[1].trim()) throw new Error("Use Name: #183C54 for each colour."); return { name: match[1].trim(), hex: match[2].toUpperCase() }; });
+            const fonts = lines("brand-fonts").map((line) => { const parts = line.split(":"); if (parts.length > 2 || !parts[0].trim()) throw new Error("Use Font family: Style for each font."); return { family: parts[0].trim(), style: parts[1]?.trim() || "Regular" }; });
+            const kit = { ...(previous || {}), schemaVersion: 1, id: editingBrandId || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50) || "brand"}-${Date.now()}`, name, version: document.getElementById("brand-version").value.trim() || "1.0", colors, fonts, voice: document.getElementById("brand-voice").value.trim(), rules: lines("brand-rules"), references: previous?.references || [], templates: previous?.templates || [] };
+            requestCampaign("brandKitSave", { kit }, "Saving the brand kit…");
+          } catch (error) { campaignNotice(error.message, true); }
+        });
+        bind("brand-import", () => { try { const raw = document.getElementById("brand-json").value; if (raw.length > 250000) throw new Error("This kit is too large. Use a JSON file below 250 KB."); requestCampaign("brandKitSave", { kit: JSON.parse(raw) }, "Importing the brand kit…"); } catch (error) { campaignNotice(`Could not import kit: ${error.message}`, true); } });
+        bind("brand-copy", () => copyCampaignText(document.getElementById("brand-json").value, "Brand kit JSON copied. Save it in a .json file to share."));
+        document.getElementById("brand-file").onchange = async (event) => {
+          const file = event.target.files?.[0]; if (!file) return;
+          const scope = campaignScope(); const generation = campaignScopeGeneration;
+          try { if (file.size > 250000) throw new Error("Use a brand kit JSON file below 250 KB."); const raw = await file.text(); if (scope !== campaignScope() || generation !== campaignScopeGeneration) return; const kit = JSON.parse(raw); document.getElementById("brand-json").value = raw; requestCampaign("brandKitSave", { kit }, "Importing the shared brand kit…"); }
+          catch (error) { if (scope === campaignScope() && generation === campaignScopeGeneration) campaignNotice(`Could not import kit: ${error.message}`, true); }
+          finally { event.target.value = ""; }
+        };
+        bind("campaign-prepare", () => requestCampaign("campaignStart", { name: document.getElementById("campaign-name").value.trim(), brief: campaignBrief(), ...(campaignBrand.value ? { brandKitId: campaignBrand.value } : {}), nodeIds: selectedStaffNodes().map((node) => node.id) }, "Preparing three editable concept workspaces…"));
+        bind("campaign-open", () => requestCampaign("campaignStatus", { campaignId: document.getElementById("campaign-saved").value }, "Opening the saved campaign…"));
+        bind("campaign-refresh", () => requestCampaign("campaignStatus", campaign ? { campaignId: campaign.id } : {}, "Refreshing saved campaign…"));
+        for (const [id, kind] of [["campaign-copy", "create"], ["campaign-review", "review"], ["campaign-export", "export"], ["campaign-size-copy", "sizes"], ["campaign-image-copy", "image"]]) bind(id, () => copyCampaignText(campaignInstructions(kind), "Instructions copied. Paste them into a regular Claude Desktop chat."));
+        bind("campaign-show", () => requestCampaign("campaignShow", { campaignId: campaign.id, conceptId: selectedConceptId }, "Showing the selected design…"));
+        bind("campaign-preview", () => { pendingPreview = selectedConceptId; return requestCampaign("campaignPreview", { campaignId: campaign.id, conceptId: selectedConceptId, original: true }, "Rendering the original design…", { original: true }); });
+        bind("campaign-approve", () => requestCampaign("campaignApprove", { campaignId: campaign.id, conceptId: selectedConceptId, revision: currentConcept().revision, userConfirmed: true }, "Approving this reviewed version…"));
+        bind("campaign-checkpoint", () => requestCampaign("campaignCheckpoint", { campaignId: campaign.id, conceptId: selectedConceptId, label: document.getElementById("campaign-checkpoint-label").value.trim() }, "Saving a version…"));
+        bind("campaign-restore", () => requestCampaign("campaignRestore", { campaignId: campaign.id, checkpointId: document.getElementById("campaign-checkpoints").value, userConfirmed: true }, "Restoring a new working draft…"));
+        bind("campaign-adapt", () => {
+          const x = Number(document.getElementById("campaign-focal-x").value); const y = Number(document.getElementById("campaign-focal-y").value);
+          if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) { campaignNotice("Image subject positions must be between 0 and 100.", true); return; }
+          return requestCampaign("campaignAdapt", { campaignId: campaign.id, conceptId: selectedConceptId, formats: campaignFormats(), focalPoint: { x: x / 100, y: y / 100 } }, "Creating campaign sizes…");
+        });
+        bind("campaign-finish", () => requestCampaign("campaignFinish", { campaignId: campaign.id, userConfirmed: true }, "Finishing the campaign…"));
+        bind("campaign-resume", () => requestCampaign("campaignResume", { campaignId: campaign.id, userConfirmed: true }, "Resuming the campaign…"));
+      }
 
       function selectedStaffNodes() { return Array.isArray(staffContext?.selection) ? staffContext.selection : []; }
       function hasWorkingCopies() {
@@ -222,10 +577,11 @@
         const busy = working || staffCopyPending || checkedTargetBusy;
         staffLocation.textContent = staffContext ? `${staffContext.documentName || "Current Figma file"} → ${staffContext.pageName || "Current page"}` : "Waiting for this file and page…";
         staffSelection.textContent = selection.length ? `${hasWorkingCopies() ? "Working copies" : "Selected originals"}: ${selection.map((node) => node.name || node.type || "Untitled layer").join(", ")}` : "Select the design you want to work on.";
-        staffNext.textContent = !isReady ? "Check the connection below before starting." : busy ? "Wait for the current operation to finish before starting another task." : "Choose a task, copy the instructions, then paste them into a regular Claude Desktop chat.";
-        staffCopyPrompt.disabled = !isReady || busy || (staffTask.value !== "check" && selection.length === 0);
-        staffCopyDesign.disabled = !isReady || busy || selection.length === 0;
+        staffNext.textContent = !isReady ? "Check the connection below before starting." : busy ? "Wait for the current operation to finish before starting another task." : activeCampaign() ? "Use Campaign Studio for draft edits. Finish the campaign before making quick edits outside its drafts." : "Choose a task, copy the instructions, then paste them into a regular Claude Desktop chat.";
+        staffCopyPrompt.disabled = !isReady || busy || (activeCampaign() && !["check", "export"].includes(staffTask.value)) || (staffTask.value !== "check" && selection.length === 0);
+        staffCopyDesign.disabled = !isReady || busy || Boolean(activeCampaign()) || selection.length === 0;
         if (!isReady) { staffPrompt.value = ""; staffPrompt.hidden = true; }
+        updateCampaign();
       }
       function renderConnectionCheck(health, message) {
         connectionHealth = health;
@@ -470,6 +826,8 @@
         const report = { product: "Figma Local Bridge", pluginVersion: version(staffContext?.pluginVersion), bridgeVersion: version(checkedBridgeVersion), connection: connectionHealth, pluginPhase: ["starting", "connecting", "connected", "reconnecting", "restart-required"].includes(phase) ? phase : "waiting", operationBusy: Boolean(working || staffCopyPending || checkedTargetBusy), selectedCount: selectedStaffNodes().length, workingOnCopies: hasWorkingCopies() };
         return copyStaffText(JSON.stringify(report, null, 2), "Support details copied. Share them with Arsenio.");
       };
+      campaignControls.ontoggle = () => { resizePanel(); if (campaignControls.open && staffReady()) requestCampaign("brandKitList", {}, "Loading brand kits…"); };
+      setupCampaignControls();
       advancedSettings.ontoggle = resizePanel;
       saveButton.onclick = () => perform("save");
       testButton.onclick = () => perform("test");
@@ -508,10 +866,14 @@
         const message = event.data?.pluginMessage;
         if (!message || typeof message !== "object" || !supportedMessageTypes.has(message.type)) return;
         lastRuntimeSeen = Date.now();
+        if (message.type === "campaign-result") { campaignResult(message); return; }
         if (message.type === "staff-context") {
+          const priorCampaignScope = campaignScope();
           const wasTarget = staffContext?.targetId;
           const wasVersion = staffContext?.pluginVersion;
           staffContext = { ...message, selection: Array.isArray(message.selection) ? message.selection.filter((node) => typeof node.id === "string") : [], workingCopyIds: Array.isArray(message.workingCopyIds) ? message.workingCopyIds : [] };
+          if (priorCampaignScope !== campaignScope()) resetCampaignContext();
+          clearCampaignClipboard();
           clearStaffPrompt();
           updateStaff();
           if (bridgeSession && (wasTarget !== staffContext.targetId || wasVersion !== staffContext.pluginVersion || connectionHealth === "unchecked")) checkStaffConnection();
@@ -548,6 +910,7 @@
         if (message.type === "bridge-metadata-error") filesMessage.textContent = message.error;
         if (message.type === "bridge-session") {
           clearStaffPrompt();
+          if (bridgeSession?.sessionId && bridgeSession.sessionId !== message.sessionId) resetCampaignContext();
           bridgeSession = { sessionId: message.sessionId, clientId: message.clientId, bridgeUrl: localBridgeUrl };
           labelInput.value = message.label || ""; urlInput.value = message.fileUrl || "";
           showConnectionName(message.label || message.documentName);
@@ -580,6 +943,7 @@
           updateStaff();
         }
         if (message.type === "bridge-activity") {
+          if (campaign && message.mutating) { campaignNeedsRefresh = true; clearCampaignClipboard(); document.getElementById("campaign-checks").textContent = "The design may have changed. Refresh the campaign before approval or size adaptation."; }
           ++activityRevision;
           if (message.phase === "start" || message.phase === "progress") {
             working = true; retryButton.disabled = true;
